@@ -1,14 +1,14 @@
 ---
 name: Feature Task
 about: SRS 기반의 구체적인 개발 태스크 명세
-title: "[Feature] LLM-TEST-02: LLM Health Check 단위 테스트"
+title: "[Feature] LLM-TEST-02: LLM Health Check 및 실패·재시도·부분 실패 정책 단위 테스트"
 labels: 'test, backend, priority:medium'
 assignees: ''
 ---
 
 ## :dart: Summary
-- 기능명: [LLM-TEST-02] Health Check 테스트 스위트
-- 목적: 선택된 LLM 엔진(Option A/B)의 연결 상태 확인 로직이 정상/장애 시나리오 모두에서 올바르게 동작하는지 검증한다.
+- 기능명: [LLM-TEST-02] Health Check 및 실패 정책 테스트 스위트
+- 목적: 선택된 LLM 엔진(Option A/B)의 연결 상태 확인 로직과 **`DEC-16` 실패 정책**(엔진 자동 전환 금지 · 일시적 오류만 재시도 · 파일 단위 부분 실패 207 · 연속 10건 실패 중단)이 정상/장애 시나리오 모두에서 올바르게 동작하는지 검증한다.
 
 ## :link: References (Spec & Context)
 > :bulb: AI Agent & Dev Note: 작업 시작 전 아래 문서를 반드시 먼저 Read/Evaluate 할 것.
