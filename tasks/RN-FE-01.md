@@ -12,7 +12,7 @@ assignees: ''
 
 ## :link: References (Spec & Context)
 > :bulb: AI Agent & Dev Note: 작업 시작 전 아래 문서를 반드시 먼저 Read/Evaluate 할 것.
-- SRS 문서: `04_SRS-Drafts/피벗 버전/SRS-draft_v0.6_OPUS.md` §4.1.4 → **REQ-FUNC-017** (Rename Diff Preview)
+- SRS 문서: `docs/SRS_v1.1_after_grill_OPUS.md` §4.1.4 → **REQ-FUNC-017** (Rename Diff Preview)
 - API: RN-QRY-01
 - **확정 사항: `DEC-17`** — PII 토큰이 잔존한 추천은 파일명으로 쓰지 않고 **"PII 포함 — 수동 확인 필요"** 상태로 표시된다
 

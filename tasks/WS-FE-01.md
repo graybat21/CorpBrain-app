@@ -12,8 +12,8 @@ assignees: ''
 
 ## :link: References (Spec & Context)
 > :bulb: AI Agent & Dev Note: 작업 시작 전 아래 문서를 반드시 먼저 Read/Evaluate 할 것.
-- SRS 문서: `04_SRS-Drafts/피벗 버전/SRS-draft_v0.6_OPUS.md` §4.1.1 → **REQ-FUNC-001, 002** (Workspace Creation & Persistence)
-- UI/UX: `04_SRS-Drafts/피벗 버전/SRS-draft_v0.6_OPUS.md` §3.2 (Client Applications)
+- SRS 문서: `docs/SRS_v1.1_after_grill_OPUS.md` §4.1.1 → **REQ-FUNC-001, 002** (Workspace Creation & Persistence)
+- UI/UX: `docs/SRS_v1.1_after_grill_OPUS.md` §3.2 (Client Applications)
 - API 명세: API-001, MOCK-001
 
 ## :white_check_mark: Task Breakdown (실행 계획)

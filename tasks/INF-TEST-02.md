@@ -11,8 +11,8 @@ assignees: ''
 
 ## :link: References (Spec & Context)
 > :bulb: AI Agent & Dev Note: 작업 시작 전 아래 문서를 반드시 먼저 Read/Evaluate 할 것.
-- SRS 문서: `04_SRS-Drafts/피벗 버전/SRS-draft_v0.6_OPUS.md` §4.2 → **REQ-NF-005** (Telemetry Blocking)
-- 제약: `04_SRS-Drafts/피벗 버전/SRS-draft_v0.6_OPUS.md` §1.5.1 → **CON-03** (외부 Telemetry 원천 배제)
+- SRS 문서: `docs/SRS_v1.1_after_grill_OPUS.md` §4.2 → **REQ-NF-005** (Telemetry Blocking)
+- 제약: `docs/SRS_v1.1_after_grill_OPUS.md` §1.5.1 → **CON-03** (외부 Telemetry 원천 배제)
 - 검증 TC: TC-SEC-002
 - **확정 사항: `DEC-13`** — "오프라인"은 정상 상태의 속성이다. 허용되는 외부 통신은 **① Option A의 마스킹된 청크 전송, ② 프로비저닝 단계의 인스톨러·모델 바이너리 다운로드** 두 가지뿐이며, 세 번째 목적지 추가는 금지
 - **확정 사항: `DEC-15`** — 강제 수단은 3층(`NetworkGuard` 관문 / CI import 린트 / 패킷 캡처)이며 **이 카드는 3층 전체를 검증**한다. 관련 요구사항 `REQ-NF-018`

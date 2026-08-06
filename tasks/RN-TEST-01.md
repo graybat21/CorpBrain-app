@@ -12,8 +12,8 @@ assignees: ''
 
 ## :link: References (Spec & Context)
 > :bulb: AI Agent & Dev Note: 작업 시작 전 아래 문서를 반드시 먼저 Read/Evaluate 할 것.
-- SRS 문서: `04_SRS-Drafts/피벗 버전/SRS-draft_v0.6_OPUS.md` §4.1.4 → **REQ-FUNC-019** (Undo Rename)
-- 신뢰성: `04_SRS-Drafts/피벗 버전/SRS-draft_v0.6_OPUS.md` §4.2 → **REQ-NF-009** (Rename Rollback Integrity)
+- SRS 문서: `docs/SRS_v1.1_after_grill_OPUS.md` §4.1.4 → **REQ-FUNC-019** (Undo Rename)
+- 신뢰성: `docs/SRS_v1.1_after_grill_OPUS.md` §4.2 → **REQ-NF-009** (Rename Rollback Integrity)
 - 보안: §4.2 → **REQ-NF-006**(PII Pre-masking, Rename 프롬프트 포함 — `DEC-17`)
 - 검증 TC: TC-REL-003, **TC-SEC-005**
 - **확정 사항: `DEC-17`** — Rename 프롬프트도 동일 `PIIFilter` 게이트를 거치고 절대 경로를 전송하지 않는다

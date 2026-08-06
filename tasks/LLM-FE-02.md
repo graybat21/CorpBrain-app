@@ -12,7 +12,7 @@ assignees: ''
 
 ## :link: References (Spec & Context)
 > :bulb: AI Agent & Dev Note: 작업 시작 전 아래 문서를 반드시 먼저 Read/Evaluate 할 것.
-- SRS 문서: `04_SRS-Drafts/피벗 버전/SRS-draft_v0.6_OPUS.md` §4.1.2 → **REQ-FUNC-010, 011** (Local LLM Provisioning, Health Check)
+- SRS 문서: `docs/SRS_v1.1_after_grill_OPUS.md` §4.1.2 → **REQ-FUNC-010, 011** (Local LLM Provisioning, Health Check)
 - API 명세: API-003
 - **확정 사항: `DEC-13`** — 모델 2종 역할 분리 표시 + 프로비저닝 2모드(`assisted` / `detect_only`)
 - **확정 사항: `DEC-04`** — `POST /api/v1/llm/onboard`는 `202` + `task_id`만 반환하므로 진행률은 **1초 폴링**으로 얻는다

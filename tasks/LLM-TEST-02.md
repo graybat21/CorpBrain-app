@@ -12,8 +12,8 @@ assignees: ''
 
 ## :link: References (Spec & Context)
 > :bulb: AI Agent & Dev Note: 작업 시작 전 아래 문서를 반드시 먼저 Read/Evaluate 할 것.
-- SRS 문서: `04_SRS-Drafts/피벗 버전/SRS-draft_v0.6_OPUS.md` §4.1.2 → **REQ-FUNC-011** (LLM Health Check)
-- 가용성: `04_SRS-Drafts/피벗 버전/SRS-draft_v0.6_OPUS.md` §4.2 → **REQ-NF-010** (Graceful Degradation)
+- SRS 문서: `docs/SRS_v1.1_after_grill_OPUS.md` §4.1.2 → **REQ-FUNC-011** (LLM Health Check)
+- 가용성: `docs/SRS_v1.1_after_grill_OPUS.md` §4.2 → **REQ-NF-010** (Graceful Degradation)
 - 검증 TC: TC-LLM-005, **TC-AVAIL-003**
 - **확정 사항: `DEC-16`** — 엔진 자동 전환 금지 / 일시적 오류만 3회 지수 백오프 / 파일 단위 부분 실패 후 207 / 연속 10건 실패 시 전체 중단
 

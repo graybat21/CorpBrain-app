@@ -12,7 +12,7 @@ assignees: ''
 
 ## :link: References (Spec & Context)
 > :bulb: AI Agent & Dev Note: 작업 시작 전 아래 문서를 반드시 먼저 Read/Evaluate 할 것.
-- SRS 문서: `SRS-draft_v0.6_OPUS.md` §4.2 → **REQ-NF-005**(Telemetry Blocking), **REQ-NF-018**(Egress Whitelist Enforcement)
+- SRS 문서: `docs/SRS_v1.1_after_grill_OPUS.md` §4.2 → **REQ-NF-005**(Telemetry Blocking), **REQ-NF-018**(Egress Whitelist Enforcement)
 - 제약: §1.5.1 → **CON-03**(외부 Telemetry 원천 배제)
 - **확정 사항: `DEC-15`** — 3층 방어(구조 / 정적 검사 / 동적 검증), `purpose` 태그 3종, 코드 상수 화이트리스트
 - 연관 결정: `DEC-12`(Anthropic 단일), `DEC-13`(프로비저닝 2모드), `DEC-06`(Ollama 임베딩), `DEC-02`(로컬 API 서버는 inbound — 대상 아님)
