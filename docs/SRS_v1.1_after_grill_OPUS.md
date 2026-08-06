@@ -1,8 +1,15 @@
-# Software Requirements Specification (SRS)
+# Software Requirements Specification (SRS) — v1.1 (after grill)
 Document ID: SRS-001  
-Revision: 1.0  
-Date: 2026-07-16  
+Revision: 1.1 (after grill)  
+Date: 2026-08-06  
 Standard: ISO/IEC/IEEE 29148:2018
+
+### Revision History
+
+| Rev | Date | 내용 |
+|:---|:---|:---|
+| **1.1** | 2026-08-06 | **구현 착수 전 `grill-it` 세션 결과 반영 — 미해소 결정 토픽 17건(T1–T17) 전부 RESOLVED.** 확정 사항 **`DEC-01` ~ `DEC-17`** 신설 및 이에 따른 본문·다이어그램·요구사항·추적표 정합화. 상세 결정 근거와 반영 내역은 `docs/grill/GRILL_LEDGER.md` 참조.<br/>· **§3.2 `DEC-01`** 데스크톱 셸 확정(pywebview+WebView2, PyInstaller `--onefile`, React 정적 SPA·HashRouter / Electron·Tauri·Next.js·Node 런타임 배제)<br/>· **§3.3 `DEC-02`** 로컬 API 서버 확정(FastAPI+uvicorn 데몬 스레드, `127.0.0.1`·`port=0`, Bearer 세션 토큰 필수, CORS 와일드카드 금지, OpenAPI 3.1 = 계약 SSOT)<br/>· **§6.1 `DEC-03`** IPC 계약 확정(전 계층 `snake_case`, 단수형 경로, 공통 봉투 `{ok,data}`/`{ok,error}`, 표준 에러 코드 10종, 부분 실패 = HTTP 207)<br/>· **§6.1 `DEC-04`** 장기 작업 모델 확정(202+`task_id`+1초 폴링, WebSocket/SSE 금지, **`Async_Task` 테이블 신설**, 부팅 시 좌초 작업 `interrupted` 전이·자동 재개 금지)<br/>· **§6.2 `DEC-05`** 데이터 접근 계층 확정(stdlib `sqlite3`만, 테이블별 Repository에 SQL 격리, `PRAGMA user_version` 마이그레이션, 스레드-로컬 커넥션, WAL·`foreign_keys=ON`·`busy_timeout`·`synchronous=NORMAL` / SQLAlchemy·Alembic·Prisma 배제)<br/>· **§6.2 `DEC-06`** 벡터 저장소 확정(ChromaDB `PersistentClient`, 워크스페이스당 컬렉션·cosine, Ollama `nomic-embed-text` 768d 명시 주입 / FAISS·torch·sentence-transformers 배제)<br/>· **§6.2.5 `DEC-07`** `Analytics_Log` 결손 보정(`file_id`/`wiki_id` nullable FK·인덱스 추가, 압축률은 스냅샷 COUNT 산출)<br/>· **§6.2.3 `DEC-08`** 딥링크 앵커·경로 정체성 확정(`[[file_id:UUID]]` late binding, `current_path`/`original_path` 분리, Rename·Undo·Watcher 이동은 단일 행 UPDATE)<br/>· **§6.2 `DEC-09`** 크로스 스토어 정합성 확정(Chroma 단일 SSOT, `vector_ids` 폐기, chunk ID `<file_id>:<chunk_index>` 결정론적 계산, 쓰기·삭제 순서 고정, 고아 벡터 lazy delete)<br/>· **§6.2.7 `DEC-10`** 전역 설정 테이블 `App_Config` 단일화(`Settings_Meta` 폐기)<br/>· **§6.2 `DEC-11`** 저장 타입·타임존 규약 확정(UUID=TEXT, DATETIME=TEXT ISO-8601 UTC, `strftime` 기본값, `ON UPDATE CURRENT_TIMESTAMP` 폐기)<br/>· **§6.3 `DEC-12`** 클라우드 프로바이더·비밀 관리 확정(Anthropic `claude-sonnet-5` 단일, API 키 **Windows DPAPI** 암호화, 단가·모델 ID는 `App_Config`)<br/>· **§6.3.2 `DEC-13`** 로컬 LLM·프로비저닝 확정("오프라인"은 정상 상태의 속성, 모델 2종 역할 분리, `assisted`/`detect_only` 2모드, 실패는 `LLM_PROVISION_REQUIRED` 즉시 종료·폴백 금지) + **REQ-NF-005 정밀화**<br/>· **§6.3.3 `DEC-14`** PII 마스킹 확정(정규식 전용 7종, NER 범위 외, 토큰 `[PII:TYPE]` 단일, 무결성 **2조건 AND**, fail-closed, 로그 위생)<br/>· **§4.2 `DEC-15` + REQ-NF-018 신설** 네트워크 egress 3층 방어(단일 `NetworkGuard` 관문 + `purpose` 태그 + 코드 상수 화이트리스트 exact match / CI import 린트 / 패킷 캡처, 원격 텔레메트리 SDK 전면 금지)<br/>· **§6.3 `DEC-16`** LLM 실패·비용 정책 확정(엔진 자동 전환 금지, 일시적 오류만 3회 지수 백오프, 파일 단위 실패 격리 → 207+`data.failed[]`, 연속 10건 실패 시 중단, 단가는 마이그레이션 시드+기준일 병기 추정치) + TC-AVAIL-003<br/>· **§6.3.3 `DEC-17`** Rename 프롬프트 경로 확정(동일 `PIIFilter` 게이트 재사용·전용 로직/분기 금지, **절대 경로 미전송** — 파일명·확장자·1-depth 폴더명·뎁스만, 토큰 잔존 시 수동 확인·역치환 금지, Windows 파일명 안전성 검증) + TC-SEC-005 |
+| 1.0 | 2026-07-16 | 초기 SRS 작성 (ISO/IEC/IEEE 29148:2018 구조) |
 
 -------------------------------------------------
 
@@ -12,7 +19,7 @@ Standard: ISO/IEC/IEEE 29148:2018
 
 본 Software Requirements Specification(SRS)은 10인 미만 중소기업이 겪고 있는 **로컬 문서 파편화**(C1: 1일 60~120분 낭비) 및 **기밀 유출 불안**(A1: SaaS 솔루션 검열 미통과) 문제를 해결하기 위한 **CorpBrain MVP** 데스크톱 애플리케이션의 기술적 요구사항을 완전하게 정의한다.
 
-본 문서는 PRD v1.0(REF-01)에서 정의된 비즈니스 목표—**문서 파악 소요 시간 60분 → 10분 이내(83.3% 단축)** 및 **보안 사고율 0%**—를 달성하기 위한 구체적 시스템 동작, 인터페이스, 데이터 모델, 그리고 제약 사항을 명시하며, 향후 설계·구현·테스트·인수(Acceptance)의 **원천 기준(Source of Truth)**으로 사용된다.
+본 문서는 PRD v1.1(REF-01)에서 정의된 비즈니스 목표—**문서 파악 소요 시간 60분 → 10분 이내(83.3% 단축)** 및 **보안 사고율 0%**—를 달성하기 위한 구체적 시스템 동작, 인터페이스, 데이터 모델, 그리고 제약 사항을 명시하며, 향후 설계·구현·테스트·인수(Acceptance)의 **원천 기준(Source of Truth)**으로 사용된다.
 
 ### 1.2 Scope
 
@@ -63,9 +70,10 @@ Standard: ISO/IEC/IEEE 29148:2018
 
 | ID | 문서명 | 비고 |
 |----|--------|------|
-| **REF-01** | `10_CorpBrain_PRD_v1.0.md` | Product Requirements Document v1.0 |
+| **REF-01** | `10_CorpBrain_PRD_v1.1_after_grill.md` | Product Requirements Document v1.1 (after grill) |
 | **REF-02** | `01_CorpBrain_VPS.md` | Value Proposition Statement (제품 비전 선언문) |
 | **REF-03** | ISO/IEC/IEEE 29148:2018 | Systems and software engineering — Life cycle processes — Requirements engineering |
+| **REF-04** | `docs/grill/GRILL_LEDGER.md` | Grill Ledger — 결정 토픽 원장(T1–T17) 및 `DEC-01`~`DEC-17` 결정 근거·반영 내역 |
 
 ### 1.5 Constraints and Assumptions
 

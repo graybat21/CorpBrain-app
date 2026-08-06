@@ -20,6 +20,8 @@ assignees: ''
 - [ ] OS 물리 경로의 존재 여부 및 접근 권한 검증 로직 추가
 - [ ] 유효한 경로들을 `Workspace_Meta` DB 테이블에 Insert (트랜잭션 적용)
 - [ ] 생성된 워크스페이스의 UUID 반환
+- [ ] **워크스페이스 삭제(`DELETE /api/v1/workspace/{id}`) 구현 (`DEC-09`)**: ① Chroma `delete_collection("ws_<id>")` → ② SQLite `Workspace_Meta` 행 삭제(자식은 `ON DELETE CASCADE`). **순서를 뒤집지 않는다** — SQLite를 먼저 지우면 참조자를 잃은 고아 벡터가 남아 검색에 유령 문서로 등장한다
+- [ ] 컬렉션이 이미 없는 경우(미분석 워크스페이스)에도 삭제가 실패하지 않도록 처리
 
 ## :test_tube: Acceptance Criteria (BDD/GWT)
 Scenario 1: 다중 폴더 병합 생성
