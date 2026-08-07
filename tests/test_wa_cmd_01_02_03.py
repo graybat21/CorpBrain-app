@@ -1,13 +1,17 @@
 import os
 import tempfile
 import time
+
 import pytest
+from watchdog.events import FileModifiedEvent, FileMovedEvent
+
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
 from src.backend.repositories.workspace_repository import WorkspaceRepository
 from src.backend.services.scanner_service import ScannerService
-from src.backend.services.watcher_service import WatcherService, WatcherMode, CorpBrainWatcherHandler
-from watchdog.events import FileModifiedEvent, FileMovedEvent
+from src.backend.services.vector_service import DeepAnalysisService, VectorDBManager
+from src.backend.services.watcher_service import CorpBrainWatcherHandler, WatcherService
+from tests.fakes import FakeEmbeddingFunction
 
 
 @pytest.fixture
@@ -33,9 +37,21 @@ def wa_setup():
         f1_rec = next(r for r in scanned if r["file_name"] == "watch_doc1.txt")
         f1_id = f1_rec["file_id"]
 
-        watcher = WatcherService(db_mgr, file_repo)
+        # Scenario 4 drives the real embedding path, so inject a workspace-bound manager over
+        # a real Chroma store in the tmpdir. A default DeepAnalysisService would now build its
+        # own manager and reach for the real Ollama daemon.
+        v_db = VectorDBManager(
+            workspace_id=ws_id,
+            persist_dir=db_mgr.vectors_dir,
+            embedding_function=FakeEmbeddingFunction(),
+        )
+        analysis = DeepAnalysisService(db_mgr, vector_db=v_db)
+        watcher = WatcherService(db_mgr, file_repo, deep_analysis_service=analysis)
+
         yield watcher, db_mgr, file_repo, ws_id, tmpdir, f1, f1_id
+
         watcher.close()
+        v_db.close()  # before TemporaryDirectory teardown (WinError 32)
         db_mgr.close()
 
 

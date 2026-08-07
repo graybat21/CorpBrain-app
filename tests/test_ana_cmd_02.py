@@ -1,11 +1,14 @@
 import os
 import tempfile
+
 import pytest
+
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
 from src.backend.repositories.workspace_repository import WorkspaceRepository
-from src.backend.services.workspace_service import WorkspaceService
 from src.backend.services.vector_service import DeepAnalysisService, VectorDBManager
+from src.backend.services.workspace_service import WorkspaceService
+from tests.fakes import FakeEmbeddingFunction
 
 
 @pytest.fixture
@@ -72,10 +75,20 @@ def db_setup():
             },
         ])
 
-        v_db = VectorDBManager()
+        # Real ChromaDB PersistentClient against the tmpdir (DEC-06). Only the embedding
+        # numbers are faked — the client, the cosine index and the `where` deletes are real.
+        v_db = VectorDBManager(
+            workspace_id=ws_id,
+            persist_dir=db_mgr.vectors_dir,
+            embedding_function=FakeEmbeddingFunction(),
+        )
         service = DeepAnalysisService(db_mgr, vector_db=v_db)
 
         yield service, v_db, db_mgr, ws_id
+
+        # close() BEFORE the TemporaryDirectory teardown: an open chroma.sqlite3 handle makes
+        # Windows cleanup fail with PermissionError [WinError 32].
+        v_db.close()
         db_mgr.close()
 
 
@@ -84,6 +97,7 @@ def test_scenario_1_deep_analysis_and_chunk_ids(db_setup):
 
     file_rec = {
         "file_id": "file_uuid_001",
+        "workspace_id": ws_id,
         "current_path": db_mgr.get_connection().cursor().execute(
             "SELECT current_path FROM File_Meta WHERE file_id = 'file_uuid_001';"
         ).fetchone()["current_path"],
@@ -96,7 +110,9 @@ def test_scenario_1_deep_analysis_and_chunk_ids(db_setup):
 
     chunks = v_db.get_file_chunks("file_uuid_001")
     assert len(chunks) == res["chunk_count"]
-    # Verify DEC-09 chunk ID format: <file_id>:<chunk_index>
+    # Verify DEC-09 chunk ID format: <file_id>:<chunk_index>.
+    # Positional indexing is valid because get_file_chunks sorts by chunk_index — Chroma's
+    # get() itself gives no ordering guarantee.
     assert chunks[0]["chunk_id"] == "file_uuid_001:0"
     assert chunks[1]["chunk_id"] == "file_uuid_001:1"
 
@@ -106,6 +122,7 @@ def test_scenario_2_vector_delete_before_upsert_sequence(db_setup):
 
     file_rec = {
         "file_id": "file_uuid_002",
+        "workspace_id": ws_id,
         "current_path": db_mgr.get_connection().cursor().execute(
             "SELECT current_path FROM File_Meta WHERE file_id = 'file_uuid_002';"
         ).fetchone()["current_path"],
