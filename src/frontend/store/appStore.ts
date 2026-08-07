@@ -7,9 +7,9 @@ export interface ToastMessage {
 }
 
 export interface WorkspaceItem {
-  workspace_id: str;
-  workspace_name: str;
-  root_path: str;
+  workspace_id: string;
+  workspace_name: string;
+  root_path: string;
 }
 
 export interface FileItem {
