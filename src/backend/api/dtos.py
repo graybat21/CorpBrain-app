@@ -55,18 +55,63 @@ class WorkspaceListRes(BaseModel):
 # --- API-002: Analysis & Task DTOs ---
 
 class TaskAcceptedRes(BaseModel):
+    """
+    Body of the 202 returned by every long-running command (DEC-04).
+
+    Carries the task_id and nothing else useful — progress comes from polling
+    GET /api/v1/analyze/{task_id}/progress at 1s intervals, not from this response.
+    """
     task_id: str
-    status: str = "pending"
+    task_type: str
+    status: str = "queued"
+    workspace_id: Optional[str] = None
 
 
 class TaskProgressRes(BaseModel):
     task_id: str
+    task_type: str
     status: str
     processed: int
     total: int
     percent: float
     eta_sec: Optional[int] = None
+    # DEC-03: the code only. error_message stays in the DB and the local log because it can
+    # hold an exception string containing an absolute internal path.
     error_code: Optional[str] = None
+    workspace_id: Optional[str] = None
+
+
+class TaskResultRes(BaseModel):
+    """
+    A finished task's outcome, fetched once after polling sees a terminal status.
+
+    Kept out of TaskProgressRes because DEC-04 forbids returning large payloads from a
+    response that is polled every second.
+    """
+    task_id: str
+    task_type: str
+    status: str
+    error_code: Optional[str] = None
+    # None while the task is still running. For a partially failed batch this is where
+    # `failed[]` lives (DEC-16) — the 202 response could not carry it.
+    result: Optional[Dict[str, Any]] = None
+    workspace_id: Optional[str] = None
+
+
+class InterruptedTaskItemRes(BaseModel):
+    """A task stranded by a crash, offered to the user for resume (DEC-04 — never automatic)."""
+    task_id: str
+    task_type: str
+    status: str
+    processed: int
+    total: int
+    created_at: str
+    workspace_id: Optional[str] = None
+
+
+class InterruptedTaskListRes(BaseModel):
+    items: List[InterruptedTaskItemRes]
+    total: int
 
 
 class ScanProgressRes(BaseModel):
