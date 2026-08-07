@@ -615,30 +615,7 @@ def test_no_forbidden_network_imports():
     assert offenders == [], f"DEC-15 violation — route these through NetworkGuard: {offenders}"
 
 
-def test_post_json_blocks_wrong_purpose_destination_pair():
-    """DEC-15: a mismatched (purpose, destination) pair issues NO request."""
-    from src.backend.network_guard import EgressBlockedError, NetworkGuard
-
-    with pytest.raises(EgressBlockedError):
-        NetworkGuard.post_json("llm_local", "https://api.anthropic.com/v1/messages", {"a": 1}, timeout=1.0)
-    with pytest.raises(EgressBlockedError):
-        NetworkGuard.post_json("provisioning", "https://api.anthropic.com/v1/messages", {"a": 1}, timeout=1.0)
-    with pytest.raises(EgressBlockedError):
-        NetworkGuard.post_json("llm_cloud", "https://evil-api.anthropic.com.attacker.net/x", {}, timeout=1.0)
-
-
-def test_post_json_unreachable_port_raises_transient():
-    from src.backend.network_guard import NetworkGuard, UpstreamUnavailableError
-
-    # Port 1 on loopback: whitelisted host, nothing listening.
-    with pytest.raises(UpstreamUnavailableError):
-        NetworkGuard.post_json("llm_local", "http://127.0.0.1:1/api/embeddings", {"a": 1}, timeout=1.0)
-
-
-def test_request_fallback_fails_loudly_without_httpx(monkeypatch):
-    """It used to silently drop **kwargs, sending a request that was not the one requested."""
-    import src.backend.network_guard as guard_mod
-
-    monkeypatch.setattr(guard_mod, "HAS_HTTPX", False)
-    with pytest.raises(NotImplementedError):
-        guard_mod.NetworkGuard.request("llm_local", "POST", "http://127.0.0.1:11434/api/embeddings", json={"a": 1})
+# NetworkGuard.post_json's own contract (payload encoding, DEC-16 status classification,
+# body non-leakage, egress blocking) is covered in tests/test_inf_cmd_03.py against a live
+# loopback server. It lives there rather than here because it is a DEC-15 concern, not a
+# vector-store one.
