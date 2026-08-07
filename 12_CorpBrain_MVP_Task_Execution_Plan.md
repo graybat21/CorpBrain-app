@@ -35,7 +35,7 @@
 - [x] **API-001**: FastAPI IPC 세션 토큰 인증 및 Workspace DTO 명세 (`WorkspaceCreateReq`, `WorkspaceItemRes`, `ApiResponse` 공통 봉투, `Authorization: Bearer` 인증)
 - [x] **API-002**: Analysis 도메인 DTO 및 스캔/분석 엔드포인트 (`ScanProgressRes`, `FastAnalysisRes`, `TaskAcceptedRes`, `TaskProgressRes`, `ApiResponse` 봉투)
 - [x] **API-003**: LLM Config, Rename, Watcher, Analytics DTO 및 엔드포인트 (`LlmOptionReq`, `LlmHealthCheckRes`, `RenameDiffRes`, `WatcherConfigReq`, `AnalyticsDashboardRes`)
-- [x] **APP-UI-01**: React SPA + Tailwind CSS + Shadcn UI + Zustand 스캐폴딩 및 메인 UI 레이아웃 (`dist/` 정적 번들 빌드 성공)
+- [x] **APP-UI-01**: React SPA 프론트엔드 UI 번들 빌드 및 주스탄드 스토어 IPC 바인딩 정합성 검증 (`appStore.ts`, Vite 5.4 100% 렌더링, `dist/` 정적 번들 생성 `DEC-01`)
 
 ---
 
