@@ -51,10 +51,19 @@ def test_llm_config_and_rename_endpoints(api_client_extended):
     client, token, tmpdir, app = api_client_extended
     headers = {"Authorization": f"Bearer {token}"}
 
-    # GET LLM Config
+    # GET LLM Config — is_healthy reflects a real probe, not a hardcoded value (DEC-13).
+    # Default mode is Option A with no API key configured in a fresh DB, so it must be false.
     res_get = client.get("/api/v1/config/llm", headers=headers)
     assert res_get.status_code == 200
-    assert res_get.json()["data"]["is_healthy"] is True
+    health = res_get.json()["data"]
+    assert health["mode"] == "Option A"
+    assert health["api_key_configured"] is False
+    assert health["is_healthy"] is False
+    assert health["error_code"] == "API_KEY_NOT_CONFIGURED"
+    # Daemon reachability is reported separately from the engine verdict (DEC-13).
+    assert "daemon_online" in health
+    assert "embedding_model_ready" in health
+    assert "generation_model_ready" in health
 
     # POST Valid LLM Config
     res_post = client.post("/api/v1/config/llm", json={"llm_mode": "Option B"}, headers=headers)
