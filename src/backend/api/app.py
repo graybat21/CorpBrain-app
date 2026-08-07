@@ -135,17 +135,17 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
     @app.get("/api/v1/config/llm")
     def get_llm_config():
         from src.backend.config_manager import ConfigManager
-        cm = ConfigManager()
+        cm = ConfigManager(db_mgr)
         return ApiResponse.success(LlmHealthCheckRes(
             status="ok",
-            mode=cm.get("llm_mode"),
+            mode=cm.get("llm_mode", "Option A"),
             is_healthy=True
         ))
 
     @app.post("/api/v1/config/llm")
     def update_llm_config(req: LlmOptionReq):
         from src.backend.config_manager import ConfigManager
-        cm = ConfigManager()
+        cm = ConfigManager(db_mgr)
         cm.set("llm_mode", req.llm_mode)
         if req.api_key is not None:
             cm.set_api_key(req.api_key)
