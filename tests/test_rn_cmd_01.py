@@ -1,8 +1,9 @@
 import os
 import tempfile
+
 import pytest
+
 from src.backend.db import DatabaseManager
-from src.backend.pii_filter import PIIFilter
 from src.backend.repositories.workspace_repository import WorkspaceRepository
 from src.backend.services.rename_service import RenameService
 

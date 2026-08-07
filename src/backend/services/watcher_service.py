@@ -4,7 +4,8 @@ import os
 import queue
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
+
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -68,7 +69,7 @@ class CorpBrainWatcherHandler(FileSystemEventHandler):
                 # Attribute-only touch — Skip event!
                 logger.debug(f"[WatcherHandler] Skipped attribute-only touch for {path}")
                 return
-            
+
             # Real modification -> Enqueue for incremental re-analysis (WA-CMD-03)
             self.service.enqueue_file_event(self.workspace_id, file_rec["file_id"], "modified", path)
         else:
@@ -126,7 +127,7 @@ class WatcherService:
         self.db_mgr = db_mgr
         self.file_repo = file_repo
         self.deep_analysis_service = deep_analysis_service or DeepAnalysisService(db_mgr)
-        
+
         self.suppress_events = False
         self.queue: queue.Queue = queue.Queue()
         self._observers: Dict[str, Observer] = {}
@@ -232,7 +233,24 @@ class WatcherService:
         path = item["path"]
 
         if not os.path.exists(path):
-            return {"status": "file_not_found", "path": path}
+            # The file is gone from disk. Drop its vectors before returning (DEC-09: vectors
+            # first, SQLite row second). Returning early without this leaked an orphan vector
+            # set on every deletion, which then kept surfacing in search results — invisible
+            # while the store was in-memory, permanent now that it is persisted.
+            file_id = item.get("file_id")
+            if file_id is None:
+                existing = self.file_repo.get_by_path(workspace_id, path)
+                file_id = existing["file_id"] if existing else None
+            if file_id:
+                try:
+                    self.deep_analysis_service.delete_file_vectors(workspace_id, file_id)
+                except Exception as e:
+                    # A vector-cleanup failure must not abort queue processing; the lazy
+                    # delete during search post-processing is the backstop (DEC-09).
+                    logger.warning(
+                        f"[WatcherService] Vector cleanup failed for file_id {file_id}: {type(e).__name__}"
+                    )
+            return {"status": "file_not_found", "path": path, "file_id": file_id}
 
         # Resolve or register file_id
         file_rec = self.file_repo.get_by_path(workspace_id, path)

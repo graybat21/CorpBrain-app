@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from typing import Any, Dict, Optional
+
 from src.backend.db import DatabaseManager
 from src.backend.utils.security import decrypt_secret, encrypt_secret
 
@@ -22,6 +23,18 @@ class ConfigManager:
         "local_embedding_model": "nomic-embed-text",
         "local_generation_model": "qwen2.5:7b-instruct",
         "api_key_encrypted": "",
+        # DEC-06: embedding identity of the vectors currently in ChromaDB. This is
+        # deliberately NOT merged with `local_embedding_model` above even though the values
+        # coincide today — the two keys answer different questions and can legitimately
+        # diverge. `local_embedding_model` (DEC-13) is "which model should provisioning
+        # pull?"; `embedding_model` is "which model produced the vectors already on disk?".
+        # Changing the former must not silently reinterpret the latter, because mixing
+        # dimensions in one collection is exactly what DEC-06 forbids.
+        "embedding_model": "nomic-embed-text",
+        "embedding_dim": "768",
+        # "" | "pending" | "granted:<model>:<dim>" — consent state for re-embedding after an
+        # embedding-identity change (DEC-06). Empty means no change has been detected.
+        "embedding_reembed_consent": "",
     }
 
     def __init__(self, db_mgr: Optional[DatabaseManager] = None, config_path: Optional[str] = None):

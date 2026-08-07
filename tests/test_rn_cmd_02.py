@@ -1,11 +1,13 @@
 import os
 import tempfile
+
 import pytest
+
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
 from src.backend.repositories.workspace_repository import WorkspaceRepository
-from src.backend.services.scanner_service import ScannerService
 from src.backend.services.rename_service import RenameService
+from src.backend.services.scanner_service import ScannerService
 
 
 @pytest.fixture
@@ -121,7 +123,8 @@ def test_scenario_4_undo_rename_reverts_physical_file_and_meta(rn_setup):
     # First apply rename diff suggestions
     files = db_mgr.get_connection().cursor().execute("SELECT * FROM File_Meta WHERE workspace_id = ?;", (ws_id,)).fetchall()
     file_dicts = [dict(r) for r in files]
-    diff_res = rs.process_rename_suggestions(ws_id, file_dicts)
+    # Called for its side effect: it writes the Rename_History row read just below.
+    rs.process_rename_suggestions(ws_id, file_dicts)
 
     # Get generated Rename_History history_id
     conn = db_mgr.get_connection()
@@ -132,7 +135,7 @@ def test_scenario_4_undo_rename_reverts_physical_file_and_meta(rn_setup):
     items = []
     old_list = [f1, f2]
     new_list = [os.path.join(tmpdir, f"2026-08_{os.path.basename(p)}") for p in old_list]
-    for old_p, new_p in zip(old_list, new_list):
+    for old_p, new_p in zip(old_list, new_list, strict=True):
         c = conn.cursor().execute("SELECT file_id FROM File_Meta WHERE current_path = ?;", (old_p,)).fetchone()
         items.append({"file_id": c["file_id"], "old_path": old_p, "new_path": new_p})
 

@@ -1,5 +1,6 @@
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set
+
 from src.backend.db import DatabaseManager
 
 
@@ -66,6 +67,37 @@ class FileRepository:
         """
         with self.db_mgr.transaction() as conn:
             conn.execute(query, (new_path, new_filename, workspace_id, file_id))
+
+    def select_existing_file_ids(self, workspace_id: str, file_ids: Iterable[str]) -> Set[str]:
+        """
+        Return the subset of `file_ids` that still have a File_Meta row (DEC-09).
+
+        Supports the lazy-delete pass in vector search post-processing: SQLite is the SSOT for
+        "does this file still exist", Chroma is the SSOT for vectors, and orphans are reclaimed
+        by dropping search hits whose file_id is absent here.
+
+        This lives in the Repository because DEC-05 keeps SQL out of the service layer —
+        VectorDBManager receives the resulting set rather than querying for it.
+        """
+        ids = list(dict.fromkeys(file_ids))
+        if not ids:
+            return set()
+
+        conn = self.db_mgr.get_connection()
+        cursor = conn.cursor()
+        found: Set[str] = set()
+        # SQLite's default SQLITE_MAX_VARIABLE_NUMBER is 999; chunk so a large search result
+        # cannot blow the parameter limit.
+        chunk_size = 500
+        for start in range(0, len(ids), chunk_size):
+            batch = ids[start:start + chunk_size]
+            placeholders = ",".join("?" * len(batch))
+            cursor.execute(
+                f"SELECT file_id FROM File_Meta WHERE workspace_id = ? AND file_id IN ({placeholders});",
+                (workspace_id, *batch),
+            )
+            found.update(row["file_id"] for row in cursor.fetchall())
+        return found
 
     def get_by_path(self, workspace_id: str, path: str) -> Optional[Dict[str, Any]]:
         conn = self.db_mgr.get_connection()

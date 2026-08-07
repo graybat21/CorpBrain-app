@@ -1,7 +1,9 @@
 import os
 import tempfile
+
 import pytest
 from fastapi.testclient import TestClient
+
 from src.backend.api.app import create_app
 from src.backend.db import DatabaseManager
 
@@ -14,8 +16,10 @@ def api_client_extended():
         db_mgr = DatabaseManager(db_path=db_path, migrations_dir=migrations_dir)
         auth_token = "test_bearer_ext_token"
         app = create_app(db_mgr, session_token=auth_token)
-        client = TestClient(app)
-        yield client, auth_token, tmpdir, app
+        # Context manager form so the lifespan shutdown closes any Chroma client (see
+        # test_api_001.py for the WinError 32 this prevents).
+        with TestClient(app) as client:
+            yield client, auth_token, tmpdir, app
         db_mgr.close()
 
 

@@ -1,7 +1,5 @@
 import base64
-import os
 import sys
-from typing import Optional
 
 if sys.platform == "win32":
     import ctypes

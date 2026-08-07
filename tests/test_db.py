@@ -1,8 +1,9 @@
 import os
-import sqlite3
 import tempfile
 import uuid
+
 import pytest
+
 from src.backend.db import DatabaseManager
 
 
@@ -101,7 +102,7 @@ def test_scenario_4_cascade_delete(temp_db):
             (ws_id, "Cascade WS", "C:\\CascadeDir"),
         )
         tx.execute(
-            """INSERT INTO File_Meta 
+            """INSERT INTO File_Meta
                (file_id, workspace_id, current_path, original_path, file_name, extension, size_bytes, last_modified)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?);""",
             (file_id, ws_id, "C:\\CascadeDir\\f1.txt", "C:\\CascadeDir\\f1.txt", "f1.txt", ".txt", 100, 1.0),

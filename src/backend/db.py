@@ -5,6 +5,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator, Optional
 
+from src.backend.utils.app_paths import get_db_path, vectors_dir_for_db
+
 
 class DatabaseManager:
     _local = threading.local()
@@ -14,10 +16,7 @@ class DatabaseManager:
         self._lock = threading.Lock()
 
         if db_path is None:
-            local_app_data = os.environ.get("LOCALAPPDATA", os.path.expanduser("~\\AppData\\Local"))
-            base_dir = Path(local_app_data) / "CorpBrain"
-            base_dir.mkdir(parents=True, exist_ok=True)
-            self.db_path = str(base_dir / "corpbrain_meta.db")
+            self.db_path = get_db_path()
         else:
             self.db_path = db_path
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -29,6 +28,18 @@ class DatabaseManager:
 
         self.run_migrations()
         self.recover_interrupted_tasks()
+
+    @property
+    def vectors_dir(self) -> str:
+        """
+        ChromaDB persist directory for this database (DEC-06).
+
+        Derived from ``db_path`` rather than always resolving ``%LocalAppData%`` so that a
+        DatabaseManager pointed at a temp dir also gets a temp-dir vector store. Vectors and
+        metadata must stay co-located: they reference each other by ``file_id`` and a
+        mismatched pair looks like mass orphan vectors (DEC-09).
+        """
+        return str(vectors_dir_for_db(self.db_path))
 
     def get_connection(self) -> sqlite3.Connection:
         if not hasattr(self._local, "conn") or self._local.conn is None:

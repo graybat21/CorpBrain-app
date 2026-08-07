@@ -1,13 +1,17 @@
 import os
 import tempfile
 import time
+
 import pytest
+from watchdog.events import FileModifiedEvent, FileMovedEvent
+
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
 from src.backend.repositories.workspace_repository import WorkspaceRepository
 from src.backend.services.scanner_service import ScannerService
-from src.backend.services.watcher_service import WatcherService, WatcherMode, CorpBrainWatcherHandler
-from watchdog.events import FileModifiedEvent, FileMovedEvent
+from src.backend.services.vector_service import DeepAnalysisService, VectorDBManager
+from src.backend.services.watcher_service import CorpBrainWatcherHandler, WatcherService
+from tests.fakes import FakeEmbeddingFunction
 
 
 @pytest.fixture
@@ -33,9 +37,21 @@ def wa_setup():
         f1_rec = next(r for r in scanned if r["file_name"] == "watch_doc1.txt")
         f1_id = f1_rec["file_id"]
 
-        watcher = WatcherService(db_mgr, file_repo)
+        # Scenario 4 drives the real embedding path, so inject a workspace-bound manager over
+        # a real Chroma store in the tmpdir. A default DeepAnalysisService would now build its
+        # own manager and reach for the real Ollama daemon.
+        v_db = VectorDBManager(
+            workspace_id=ws_id,
+            persist_dir=db_mgr.vectors_dir,
+            embedding_function=FakeEmbeddingFunction(),
+        )
+        analysis = DeepAnalysisService(db_mgr, vector_db=v_db)
+        watcher = WatcherService(db_mgr, file_repo, deep_analysis_service=analysis)
+
         yield watcher, db_mgr, file_repo, ws_id, tmpdir, f1, f1_id
+
         watcher.close()
+        v_db.close()  # before TemporaryDirectory teardown (WinError 32)
         db_mgr.close()
 
 
@@ -114,6 +130,32 @@ def test_scenario_3_file_moved_event_preserves_file_id(wa_setup):
 
     assert row["current_path"] == new_f1
     assert row["file_name"] == "moved_watch_doc1.txt"
+
+
+def test_scenario_5_deleted_file_vectors_are_cleaned_up(wa_setup):
+    """
+    DEC-09: a file gone from disk must have its vectors dropped, not just be skipped.
+
+    The old early-return leaked an orphan vector set on every deletion. That was invisible
+    while the store was in-memory; with a persisted store the orphans keep surfacing in
+    search results.
+    """
+    watcher, db_mgr, file_repo, ws_id, tmpdir, f1, f1_id = wa_setup
+    vector_db = watcher.deep_analysis_service.vector_db
+
+    with open(f1, "w", encoding="utf-8") as f:
+        f.write("Content that will be indexed then deleted.\n" * 20)
+
+    watcher.enqueue_file_event(ws_id, f1_id, "modified", f1)
+    watcher.process_next_queued_item()
+    assert vector_db.count_chunks(f1_id) > 0
+
+    os.remove(f1)
+    watcher.enqueue_file_event(ws_id, f1_id, "deleted", f1)
+    res = watcher.process_next_queued_item()
+
+    assert res["status"] == "file_not_found"
+    assert vector_db.count_chunks(f1_id) == 0
 
 
 def test_scenario_4_incremental_reanalysis_queue_processing(wa_setup):

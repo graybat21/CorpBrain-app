@@ -1,5 +1,6 @@
 import os
 from typing import Any, Dict, List, Optional
+
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
 from src.backend.repositories.workspace_repository import WorkspaceRepository
@@ -125,7 +126,10 @@ class RenameQueryService:
         new_paths = json.loads(row["new_paths"]) if row["new_paths"] else []
 
         diff_list = []
-        for op, np in zip(old_paths, new_paths):
+        # strict=True: both lists come from the same Rename_History row and are written in
+        # lockstep, so a length mismatch is corruption — truncating it silently would hand the
+        # user a diff that is missing rows.
+        for op, np in zip(old_paths, new_paths, strict=True):
             diff_list.append({
                 "file_id": op.get("file_id"),
                 "old_name": os.path.basename(op.get("path", "")),

@@ -4,8 +4,10 @@ import os
 import re
 import uuid
 from typing import Any, Dict, List, Optional
+
 from src.backend.db import DatabaseManager
 from src.backend.pii_filter import PIIFilter, PIIMaskingFailedException
+from src.backend.utils.file_utils import derive_folder_1depth
 
 logger = logging.getLogger("CorpBrain.RenameService")
 
@@ -30,8 +32,8 @@ class RenameService:
         """
         current_path = file_meta.get("current_path", "").replace("\\", "/")
         parts = [p for p in current_path.split("/") if p]
-        
-        folder_1depth = parts[-2] if len(parts) >= 2 else "root"
+
+        folder_1depth = derive_folder_1depth(current_path)
         depth_level = len(parts)
 
         return {
@@ -86,8 +88,11 @@ class RenameService:
             raw_prompt = f"Recommend standardized filename for file: {ctx['file_name']} in folder: {ctx['folder_1depth']}"
 
             try:
-                masked_res = self.pii_filter.mask(raw_prompt)
-                masked_prompt = masked_res.masked_text
+                # DEC-17: the same PIIFilter gate as analysis chunks. The masked text is not
+                # bound to a name here because the current LLM call is a local mock; when a
+                # real Option A call replaces mock_llm_callback, masked_res.masked_text is
+                # what must be sent — never raw_prompt.
+                self.pii_filter.mask(raw_prompt)
             except PIIMaskingFailedException as e:
                 logger.warning(f"[RN-CMD-01] PII masking failed for file: {e}")
                 diff_results.append({
@@ -170,7 +175,9 @@ class RenameService:
                 old_list = json.loads(row["old_paths"])
                 new_list = json.loads(row["new_paths"])
                 items = []
-                for old_p, new_p in zip(old_list, new_list):
+                # strict=True: the two JSON arrays are written together in
+                # process_rename_suggestions, so unequal lengths mean a corrupted history row.
+                for old_p, new_p in zip(old_list, new_list, strict=True):
                     # Fetch file_id from File_Meta by current_path == old_p
                     c = conn.cursor()
                     c.execute("SELECT file_id FROM File_Meta WHERE current_path = ?;", (old_p,))
@@ -260,7 +267,8 @@ class RenameService:
         succeeded = []
         failed = []
 
-        for old_path, new_path in zip(old_list, new_list):
+        # strict=True — same paired-array invariant as apply_rename.
+        for old_path, new_path in zip(old_list, new_list, strict=True):
             old_name = os.path.basename(old_path)
             # Find file_id by current_path == new_path
             cursor.execute("SELECT file_id FROM File_Meta WHERE current_path = ?;", (new_path,))

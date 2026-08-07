@@ -84,10 +84,15 @@ class PIIFilter:
 
             return MaskedResult(masked_text=masked_text, counts=counts)
 
+        except PIIMaskingFailedException:
+            raise
         except Exception as e:
-            if isinstance(e, PIIMaskingFailedException):
-                raise e
-            raise PIIMaskingFailedException(f"PII_MASKING_FAILED: Internal error {e}")
+            # `from None` deliberately breaks the chain: DEC-14 forbids PII reaching a log or
+            # error response, and a chained traceback would carry the original text along with
+            # it. Only the exception type is named for the same reason.
+            raise PIIMaskingFailedException(
+                f"PII_MASKING_FAILED: Internal error ({type(e).__name__})"
+            ) from None
 
     def validate_integrity(self, masked_text: str, original_matches: List[str]) -> bool:
         """
@@ -96,7 +101,7 @@ class PIIFilter:
         Condition B: None of original detected raw match strings exist as substring in masked_text.
         """
         # Condition A
-        for pii_type, pattern in self.PATTERNS.items():
+        for pattern in self.PATTERNS.values():
             if pattern.search(masked_text) is not None:
                 return False
 

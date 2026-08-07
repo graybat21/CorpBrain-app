@@ -1,11 +1,13 @@
 import os
 import tempfile
+
 import pytest
+
+from src.backend.config_manager import ConfigManager
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
 from src.backend.repositories.workspace_repository import WorkspaceRepository
 from src.backend.services.analytics_service import AnalyticsService
-from src.backend.config_manager import ConfigManager
 
 
 @pytest.fixture

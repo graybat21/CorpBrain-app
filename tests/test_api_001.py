@@ -1,5 +1,6 @@
 import os
 import tempfile
+
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -17,8 +18,12 @@ def api_client():
         db_mgr = DatabaseManager(db_path=db_path, migrations_dir=migrations_dir)
         token = "test_bearer_token_12345"
         app = create_app(db_mgr=db_mgr, session_token=token)
-        client = TestClient(app)
-        yield client, token, tmpdir
+        # TestClient must be used as a context manager: only then does it run the lifespan
+        # shutdown that closes the Chroma client. Without it the DELETE test leaves
+        # vectors/chroma.sqlite3 open and TemporaryDirectory cleanup fails on Windows
+        # (PermissionError [WinError 32]).
+        with TestClient(app) as client:
+            yield client, token, tmpdir
         db_mgr.close()
 
 

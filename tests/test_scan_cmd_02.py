@@ -1,10 +1,12 @@
 import os
 import tempfile
+
 import pytest
+
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
 from src.backend.repositories.workspace_repository import WorkspaceRepository
-from src.backend.services.scanner_service import ScannerService, ScanLimitReachedException
+from src.backend.services.scanner_service import ScanLimitReachedException, ScannerService
 
 
 def test_scan_limit_reached_exception():

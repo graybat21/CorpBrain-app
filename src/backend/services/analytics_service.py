@@ -1,8 +1,9 @@
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
-from src.backend.db import DatabaseManager
+
 from src.backend.config_manager import ConfigManager
+from src.backend.db import DatabaseManager
 
 logger = logging.getLogger("CorpBrain.AnalyticsService")
 

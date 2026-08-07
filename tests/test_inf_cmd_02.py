@@ -1,7 +1,6 @@
-import json
 import os
 import tempfile
-import pytest
+
 from src.backend.config_manager import ConfigManager
 
 
