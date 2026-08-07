@@ -22,7 +22,7 @@
 - [ ] **ANA-CMD-02**: 문서 청킹 및 벡터 파이프라인
 - [x] **LLM-CMD-01**: Ollama 로컬 임베딩 및 하이브리드 LLM 설정 관리 (`ConfigManager`, `App_Config` SQLite 백엔드, Windows DPAPI 암호화 키 보관 `DEC-10` / `DEC-12` / `DEC-16`)
 - [x] **LLM-CMD-02**: Anthropic Claude Sonnet 5 연동 & PII 사전 마스킹 게이트 (PIIFilter 7종 정규식)
-- [ ] **LLM-CMD-03**: LLM 실패/재시도/부분격리 (HTTP 207, 지수 백오프)
+- [x] **LLM-CMD-03**: LLM 실패/재시도/부분격리 (`LLMResilienceService`, HTTP 207 Multi-Status 격리, 최대 3회 지수 백오프, 10회 연속 실패 서킷 브레이커 `DEC-16`)
 - [x] **RN-CMD-01**: 파일명 추천 Diff 생성 (`RenameService`, 상대경로 전송, PII 게이트 재사용, Windows 파일명 안전성 검증)
 - [x] **DL-CMD-01**: 딥링크 식별자 매핑 (`DeepLinkService`, `[[file_id:UUID]]` 앵커 파싱, Late Binding 경로 리졸버)
 
