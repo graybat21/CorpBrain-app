@@ -333,7 +333,6 @@ export interface RenameDiffItemRes {
 export interface RenameDiffRes {
   workspace_id: string;
   items: RenameDiffItemRes[];
-  history_id?: string | null;
 }
 
 export interface RenameUndoReq {

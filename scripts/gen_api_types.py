@@ -263,8 +263,6 @@ def main() -> int:
         if not OUTPUT_PATH.is_file():
             print(f"[gen_api_types] MISSING: {OUTPUT_PATH.relative_to(REPO_ROOT)}", file=sys.stderr)
             return 1
-        # read_text is universal-newlines, so a core.autocrlf checkout (CRLF on disk) still
-        # compares equal to the LF we generate. Do not switch this to read_bytes.
         current = OUTPUT_PATH.read_text(encoding="utf-8")
         if current != generated:
             print(
