@@ -19,7 +19,7 @@
 
 ### Phase 3: 분석 및 LLM 인프라 레이어 (Analysis & LLM Engine)
 - [x] **ANA-CMD-01**: 구조 기반 고속 분석 (`FastAnalysisEngine`, `FastAnalysisService`, 가중치 사전 기반 점수 산출 및 DB 업데이트)
-- [ ] **ANA-CMD-02**: 문서 청킹 및 벡터 파이프라인
+- [x] **ANA-CMD-02**: 문서 파싱, 청킹 및 벡터 파이프라인 (`DocumentParser`, `TextChunker`, `VectorDBManager`, `DeepAnalysisService`, `<file_id>:<chunk_index>` 앵커, `delete -> upsert` 순서 고정 `DEC-06` / `DEC-09`)
 - [x] **LLM-CMD-01**: Ollama 로컬 임베딩 및 하이브리드 LLM 설정 관리 (`ConfigManager`, `App_Config` SQLite 백엔드, Windows DPAPI 암호화 키 보관 `DEC-10` / `DEC-12` / `DEC-16`)
 - [x] **LLM-CMD-02**: Anthropic Claude Sonnet 5 연동 & PII 사전 마스킹 게이트 (PIIFilter 7종 정규식)
 - [x] **LLM-CMD-03**: LLM 실패/재시도/부분격리 (`LLMResilienceService`, HTTP 207 Multi-Status 격리, 최대 3회 지수 백오프, 10회 연속 실패 서킷 브레이커 `DEC-16`)

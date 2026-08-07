@@ -23,9 +23,9 @@ class DatabaseManager:
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
         if migrations_dir is None:
-            self.migrations_dir = str(Path(__file__).parent.parent.parent / "migrations")
+            self.migrations_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "migrations"))
         else:
-            self.migrations_dir = migrations_dir
+            self.migrations_dir = os.path.abspath(migrations_dir)
 
         self.run_migrations()
         self.recover_interrupted_tasks()
@@ -73,24 +73,25 @@ class DatabaseManager:
         cursor.execute("PRAGMA user_version;")
         current_version = cursor.fetchone()[0]
 
-        mig_dir = Path(self.migrations_dir).resolve()
-        if not mig_dir.exists():
+        mig_dir_path = os.path.abspath(self.migrations_dir)
+        if not os.path.exists(mig_dir_path):
             return
 
-        sql_files = sorted(mig_dir.glob("v*.sql"))
-        if not sql_files:
-            sql_files = sorted([Path(os.path.join(str(mig_dir), f)) for f in os.listdir(str(mig_dir)) if f.startswith("v") and f.endswith(".sql")])
-        for sql_file in sql_files:
-            filename = sql_file.name
+        filenames = sorted([f for f in os.listdir(mig_dir_path) if f.startswith("v") and f.endswith(".sql")])
+        for filename in filenames:
+            sql_file_path = os.path.join(mig_dir_path, filename)
             try:
                 version_num = int(filename.split("_")[0].replace("v", ""))
             except ValueError:
                 continue
 
             if version_num > current_version:
-                sql_script = sql_file.read_text(encoding="utf-8")
+                with open(sql_file_path, "r", encoding="utf-8") as f:
+                    sql_script = f.read()
                 cursor.executescript(sql_script)
                 cursor.execute(f"PRAGMA user_version = {version_num};")
+                conn.commit()
+                conn.execute("PRAGMA wal_checkpoint(FULL);")
                 current_version = version_num
 
     def recover_interrupted_tasks(self):
