@@ -1,0 +1,38 @@
+# CorpBrain MVP — lint configuration (CLAUDE.md §6: zero lint errors before a PR)
+
+target-version = "py310"
+line-length = 120
+exclude = [".conda", ".venv", "frontend", "build", "dist", "__pycache__"]
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "B",    # flake8-bugbear (includes bare-except / broad-exception checks)
+    "TID",  # flake8-tidy-imports — carries the DEC-15 banned-api rule below
+]
+ignore = [
+    "E501",  # line length is reported by the formatter, not worth failing a build over
+]
+
+[lint.flake8-tidy-imports.banned-api]
+# DEC-15: NetworkGuard is the single outbound egress gate. No other module may
+# import a network library. `network_guard.py` is exempted below.
+#
+# Note: this is a LOCAL lint rule. DEC-15 also calls for a CI rule that blocks the
+# merge — that lives in .github/workflows/ and is tracked separately as issue #85.
+# It also cannot constrain third-party packages (see the chromadb note in
+# requirements.txt); tests/test_db_002.py adds an AST check as defence in depth.
+"requests".msg = "DEC-15: route outbound HTTP through src.backend.network_guard.NetworkGuard."
+"socket".msg = "DEC-15: raw sockets bypass the egress whitelist. Use NetworkGuard."
+"urllib.request".msg = "DEC-15: route outbound HTTP through NetworkGuard."
+"httpx".msg = "DEC-15: only network_guard.py may import httpx."
+"websockets".msg = "DEC-04: no WebSocket/SSE push channel exists by design; poll instead."
+
+[lint.per-file-ignores]
+# NetworkGuard is the one module that is *supposed* to import a network library.
+"src/backend/network_guard.py" = ["TID251"]
+# Tests assert on the forbidden imports and patch urllib to simulate a dead daemon.
+"tests/*" = ["TID251"]

@@ -1,0 +1,40 @@
+# CorpBrain MVP — runtime dependencies (Python 3.10+, CLAUDE.md §6)
+#
+# Every entry here is pre-approved by a LOCKED design decision (CLAUDE.md §4).
+# Adding anything else requires documented technical justification.
+#
+# Versions are pinned with `==` on purpose: this file is the reproducible-environment
+# contract, and `requirements.lock.txt` records the full transitive closure.
+
+# --- Desktop shell (DEC-01) ---
+pywebview==6.2.1
+
+# --- Local loopback API server (DEC-02) ---
+fastapi==0.128.8
+uvicorn==0.39.0
+pydantic==2.13.4
+
+# --- Vector store (DEC-06) ---
+# Pinned EXACTLY, not `>=`. chromadb bundles its own HTTP client, so NetworkGuard
+# (DEC-15) cannot intercept its egress and socket monkey-patching is forbidden.
+# 1.5.9 is the version whose telemetry client was verified to be an inert no-op;
+# the pin is therefore a load-bearing security control, not a convenience.
+# Upgrading requires re-verifying tests/test_db_002.py::test_telemetry_is_disabled_and_inert.
+chromadb==1.5.9
+
+# --- Cloud LLM (DEC-12) — Anthropic only, no second provider ---
+anthropic==0.120.2
+
+# --- Filesystem watcher & document parsing (SRS §8) ---
+watchdog==6.0.0
+python-docx==1.2.0
+pdfminer.six==20251107
+
+# --- Outbound HTTP (DEC-15) ---
+# May ONLY be imported by src/backend/network_guard.py. Enforced by ruff
+# flake8-tidy-imports banned-api and tests/test_db_002.py::test_no_forbidden_network_imports.
+httpx==0.28.1
+
+# Deliberately NOT pinned here: numpy, onnxruntime, tokenizers, grpcio,
+# opentelemetry-*, kubernetes, websockets. These are chromadb transitives that no
+# CorpBrain module imports. Hand-pinning them only creates resolver conflicts.

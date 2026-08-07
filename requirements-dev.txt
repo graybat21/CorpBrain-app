@@ -1,0 +1,13 @@
+# CorpBrain MVP — development-only dependencies (CLAUDE.md §6)
+# Not shipped in the PyInstaller bundle.
+
+# Test framework. Pinned to 8.x rather than 9.x: the suite uses no
+# pytest.warns(None), yield_fixture, or nose-style setup/teardown, so 8.x is safe
+# and avoids 9.x's stricter collection rules landing mid-migration.
+pytest==8.4.2
+
+# Linter — CLAUDE.md §6 requires zero lint errors before a PR.
+ruff==0.16.1
+
+# Packaging (DEC-01) — used by scripts/, never imported by src/.
+pyinstaller==6.21.0

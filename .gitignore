@@ -21,7 +21,16 @@ htmlcov/
 *.db-shm
 *.log
 
+# ChromaDB persistent store (DEC-06). Chroma's internal metadata DB is named
+# chroma.sqlite3, which the *.db patterns above do NOT match.
+vectors/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
 # Environment & CLI
 .env
 .env.local
 .antigravitycli/
+.venv/
+.conda/
