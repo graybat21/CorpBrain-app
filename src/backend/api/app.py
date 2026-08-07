@@ -1,5 +1,5 @@
 import secrets
-from typing import Optional
+from typing import Any, Dict, Optional
 from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from src.backend.api.dtos import (
@@ -164,5 +164,46 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         rs = RenameService(db_mgr)
         diff_items = rs.process_rename_suggestions(workspace_id, files)
         return ApiResponse.success(RenameDiffRes(workspace_id=workspace_id, items=diff_items))
+
+    @app.post("/api/v1/workspace/{workspace_id}/rename/apply")
+    def apply_rename_endpoint(workspace_id: str, payload: Optional[Dict[str, Any]] = None):
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+        from src.backend.services.rename_service import RenameService
+        rs = RenameService(db_mgr)
+        items = payload.get("items") if payload else None
+        history_id = payload.get("history_id") if payload else None
+        res = rs.apply_rename(workspace_id, items=items, history_id=history_id)
+        
+        if res.get("status") == "multi_status":
+            return JSONResponse(
+                status_code=status.HTTP_207_MULTI_STATUS,
+                content=ApiResponse.success(res).model_dump()
+            )
+        return ApiResponse.success(res)
+
+    @app.post("/api/v1/workspace/{workspace_id}/rename/undo")
+    def undo_rename_endpoint(workspace_id: str, payload: Optional[Dict[str, Any]] = None):
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+        from src.backend.services.rename_service import RenameService
+        rs = RenameService(db_mgr)
+        history_id = payload.get("history_id") if payload else None
+        res = rs.undo_rename(workspace_id, history_id=history_id)
+        
+        if res.get("status") == "multi_status":
+            return JSONResponse(
+                status_code=status.HTTP_207_MULTI_STATUS,
+                content=ApiResponse.success(res).model_dump()
+            )
+        return ApiResponse.success(res)
 
     return app

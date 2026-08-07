@@ -24,6 +24,7 @@
 - [x] **LLM-CMD-02**: Anthropic Claude Sonnet 5 연동 & PII 사전 마스킹 게이트 (PIIFilter 7종 정규식)
 - [x] **LLM-CMD-03**: LLM 실패/재시도/부분격리 (`LLMResilienceService`, HTTP 207 Multi-Status 격리, 최대 3회 지수 백오프, 10회 연속 실패 서킷 브레이커 `DEC-16`)
 - [x] **RN-CMD-01**: 파일명 추천 Diff 생성 (`RenameService`, 상대경로 전송, PII 게이트 재사용, Windows 파일명 안전성 검증)
+- [x] **RN-CMD-02**: 승인된 Diff 기반 OS 레벨 물리 파일 Rename 및 내역 확정 (`apply_rename`, `File_Meta` 커밋 isolation `DEC-05`, `original_path` / `Wiki_Content` 보존 `DEC-08`, 부분 실패 HTTP 207 `DEC-03`)
 - [x] **DL-CMD-01**: 딥링크 식별자 매핑 (`DeepLinkService`, `[[file_id:UUID]]` 앵커 파싱, Late Binding 경로 리졸버)
 
 ### Phase 4: API & 프론트엔드 UI 레이어 (IPC API & React SPA UI)

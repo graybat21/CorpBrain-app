@@ -148,3 +148,163 @@ class RenameService:
             )
 
         return diff_results
+
+    def apply_rename(
+        self,
+        workspace_id: str,
+        items: Optional[List[Dict[str, Any]]] = None,
+        history_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Executes OS-level physical file rename and updates SQLite File_Meta (RN-CMD-02 / DEC-08 / DEC-05).
+        - Updates File_Meta.current_path and file_name per file commit (DEC-05).
+        - Leaves original_path and Wiki_Content untouched (DEC-08).
+        - Handles file locks/errors via partial failure (HTTP 207).
+        """
+        if not items and history_id:
+            conn = self.db_mgr.get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT old_paths, new_paths FROM Rename_History WHERE history_id = ?;", (history_id,))
+            row = cursor.fetchone()
+            if row:
+                old_list = json.loads(row["old_paths"])
+                new_list = json.loads(row["new_paths"])
+                items = []
+                for old_p, new_p in zip(old_list, new_list):
+                    # Fetch file_id from File_Meta by current_path == old_p
+                    c = conn.cursor()
+                    c.execute("SELECT file_id FROM File_Meta WHERE current_path = ?;", (old_p,))
+                    r = c.fetchone()
+                    if r:
+                        items.append({"file_id": r["file_id"], "old_path": old_p, "new_path": new_p})
+
+        if not items:
+            return {"status": "completed", "applied_count": 0, "failed": []}
+
+        succeeded = []
+        failed = []
+
+        for item in items:
+            file_id = item["file_id"]
+            old_path = item["old_path"]
+            new_path = item["new_path"]
+            new_name = os.path.basename(new_path)
+
+            if not os.path.exists(old_path):
+                failed.append({
+                    "file_id": file_id,
+                    "old_path": old_path,
+                    "new_path": new_path,
+                    "error_code": "FILE_NOT_FOUND",
+                    "error_message": "원본 파일이 존재하지 않습니다."
+                })
+                continue
+
+            try:
+                # 1. Physical OS Rename
+                os.rename(old_path, new_path)
+
+                # 2. Update File_Meta current_path and file_name per file commit (DEC-05 / DEC-08)
+                with self.db_mgr.transaction() as conn:
+                    conn.execute(
+                        """UPDATE File_Meta
+                           SET current_path = ?, file_name = ?, updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                           WHERE file_id = ?;""",
+                        (new_path, new_name, file_id),
+                    )
+                succeeded.append({"file_id": file_id, "old_path": old_path, "new_path": new_path})
+                logger.info(f"[RenameService] Renamed file {file_id}: {old_path} -> {new_path}")
+            except Exception as e:
+                logger.error(f"[RenameService] OS Rename failed for file {file_id}: {e}")
+                failed.append({
+                    "file_id": file_id,
+                    "old_path": old_path,
+                    "new_path": new_path,
+                    "error_code": type(e).__name__,
+                    "error_message": str(e)
+                })
+
+        status = "applied" if not failed else "multi_status"
+        return {
+            "status": status,
+            "applied_count": len(succeeded),
+            "succeeded": succeeded,
+            "failed": failed
+        }
+
+    def undo_rename(self, workspace_id: str, history_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Reverts OS physical file names to old_paths based on Rename_History (RN-CMD-03 / DEC-08).
+        - Reverts File_Meta.current_path and file_name.
+        - Leaves original_path and Wiki_Content untouched (DEC-08).
+        """
+        conn = self.db_mgr.get_connection()
+        cursor = conn.cursor()
+
+        if history_id:
+            cursor.execute("SELECT history_id, old_paths, new_paths FROM Rename_History WHERE history_id = ?;", (history_id,))
+        else:
+            cursor.execute(
+                "SELECT history_id, old_paths, new_paths FROM Rename_History WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 1;",
+                (workspace_id,)
+            )
+
+        row = cursor.fetchone()
+        if not row:
+            return {"status": "no_history", "reverted_count": 0, "failed": []}
+
+        hist_id = row["history_id"]
+        old_list = json.loads(row["old_paths"])
+        new_list = json.loads(row["new_paths"])
+
+        succeeded = []
+        failed = []
+
+        for old_path, new_path in zip(old_list, new_list):
+            old_name = os.path.basename(old_path)
+            # Find file_id by current_path == new_path
+            cursor.execute("SELECT file_id FROM File_Meta WHERE current_path = ?;", (new_path,))
+            file_row = cursor.fetchone()
+            file_id = file_row["file_id"] if file_row else "unknown"
+
+            if not os.path.exists(new_path):
+                failed.append({
+                    "file_id": file_id,
+                    "current_path": new_path,
+                    "target_path": old_path,
+                    "error_code": "FILE_NOT_FOUND",
+                    "error_message": "원복할 대상 파일이 존재하지 않습니다."
+                })
+                continue
+
+            try:
+                # 1. OS Rename back to old_path
+                os.rename(new_path, old_path)
+
+                # 2. Update File_Meta current_path and file_name (DEC-08)
+                if file_id != "unknown":
+                    with self.db_mgr.transaction() as c:
+                        c.execute(
+                            """UPDATE File_Meta
+                               SET current_path = ?, file_name = ?, updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                               WHERE file_id = ?;""",
+                            (old_path, old_name, file_id),
+                        )
+                succeeded.append({"file_id": file_id, "reverted_path": old_path})
+            except Exception as e:
+                failed.append({
+                    "file_id": file_id,
+                    "current_path": new_path,
+                    "target_path": old_path,
+                    "error_code": type(e).__name__,
+                    "error_message": str(e)
+                })
+
+        status = "reverted" if not failed else "multi_status"
+        return {
+            "history_id": hist_id,
+            "status": status,
+            "reverted_count": len(succeeded),
+            "succeeded": succeeded,
+            "failed": failed
+        }
