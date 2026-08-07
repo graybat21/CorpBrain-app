@@ -18,6 +18,8 @@
 - [x] **SCAN-CMD-02**: 파일 스캔 Limit Guard (`ScanLimitReachedException`, 10K 파일 초과 시 중단)
 
 ### Phase 3: 분석 및 LLM 인프라 레이어 (Analysis & LLM Engine)
+- [x] **STAT-CMD-01**: 사용자 액션 트래킹 및 비용 로깅 (`AnalyticsService.log_event`, `Analytics_Log` SQLite 테이블, Option A/B 비용 산출 `DEC-16`, 삭제 시 이력 보존 `DEC-07`)
+- [x] **STAT-QRY-01**: WPM 기반 대시보드 통계 집계 (`AnalyticsService.get_analytics_summary`, 250 WPM 환산 시간 절약 분, 스냅샷 압축률 `DEC-07`, KST ISO-8601 UTC 기간 필터 `DEC-11`)
 - [x] **ANA-CMD-01**: 구조 기반 고속 분석 (`FastAnalysisEngine`, `FastAnalysisService`, 가중치 사전 기반 점수 산출 및 DB 업데이트)
 - [x] **ANA-CMD-02**: 문서 파싱, 청킹 및 벡터 파이프라인 (`DocumentParser`, `TextChunker`, `VectorDBManager`, `DeepAnalysisService`, `<file_id>:<chunk_index>` 앵커, `delete -> upsert` 순서 고정 `DEC-06` / `DEC-09`)
 - [x] **LLM-CMD-01**: Ollama 로컬 임베딩 및 하이브리드 LLM 설정 관리 (`ConfigManager`, `App_Config` SQLite 백엔드, Windows DPAPI 암호화 키 보관 `DEC-10` / `DEC-12` / `DEC-16`)
