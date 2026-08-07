@@ -1,12 +1,79 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Files, BookOpen, ShieldCheck, Zap, ArrowUpRight, BarChart3 } from 'lucide-react';
+import * as api from '../api/client';
+import { errorMessage } from '../api/client';
+import type { AnalyticsSummaryRes } from '../api/types.gen';
 import { useAppStore } from '../store/appStore';
 
 export const DashboardPage: React.FC = () => {
-  const { files, currentWorkspace, addToast, setActiveTab } = useAppStore();
+  const { files, currentWorkspace, isReady, addToast, setActiveTab } = useAppStore();
+  const [summary, setSummary] = useState<AnalyticsSummaryRes | null>(null);
+
+  const workspaceId = currentWorkspace?.workspace_id;
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setSummary(null);
+      return;
+    }
+    let cancelled = false;
+    // DEC-11: the backend never infers a period boundary, so no from_time/to_time means
+    // "all time". A KST week/month view would compute its own UTC bounds and pass them here.
+    api
+      .getAnalyticsSummary(workspaceId)
+      .then((res) => {
+        if (!cancelled) {
+          setSummary(res);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          addToast('error', errorMessage(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, addToast]);
 
   const totalFiles = files.length;
   const highPriorityFiles = files.filter((f) => f.importance_score >= 50);
+
+  // `compression_ratio` is the "<parsed files>:<wiki documents>" snapshot the analytics service
+  // computes. Parsing the second term is cheaper than a second endpoint; `null` renders as "—"
+  // rather than 0, so "not loaded" never reads as "no wiki exists".
+  const wikiCount = summary ? Number(summary.compression_ratio.split(':')[1] ?? NaN) : NaN;
+  const wikiCountLabel = Number.isFinite(wikiCount) ? wikiCount : null;
+
+  const handleOpenFile = async (fileId: string, fileName: string) => {
+    if (!workspaceId) {
+      return;
+    }
+    try {
+      // DEC-08: file_id only. The path is resolved server-side from File_Meta.current_path.
+      await api.openDeepLink(workspaceId, { file_id: fileId });
+      await api.logAnalyticsEvent(workspaceId, { event_type: 'deeplink_click', file_id: fileId });
+    } catch (err) {
+      addToast('error', `${fileName}: ${errorMessage(err)}`);
+    }
+  };
+
+  if (!isReady) {
+    return (
+      <div className="p-6 text-xs text-slate-400">워크스페이스 정보를 불러오는 중입니다...</div>
+    );
+  }
+
+  if (!currentWorkspace) {
+    return (
+      <div className="p-6 space-y-2">
+        <h1 className="text-xl font-bold text-white tracking-tight">워크스페이스가 없습니다</h1>
+        <p className="text-xs text-slate-400">
+          분석할 폴더를 워크스페이스로 등록하면 스캔 및 중요도 분석을 시작할 수 있습니다.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6 overflow-y-auto h-full">
@@ -54,17 +121,24 @@ export const DashboardPage: React.FC = () => {
             <span className="text-xs font-medium">생성된 딥링크 위키</span>
             <BookOpen className="w-4 h-4 text-blue-400" />
           </div>
-          <p className="text-2xl font-bold text-white font-mono">1 <span className="text-xs text-slate-400 font-sans">개</span></p>
+          <p className="text-2xl font-bold text-white font-mono">
+            {wikiCountLabel ?? '—'} <span className="text-xs text-slate-400 font-sans">개</span>
+          </p>
           <p className="text-[11px] text-blue-400">Late Binding [[file_id:UUID]] 유지</p>
         </div>
 
         <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 space-y-2">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="text-xs font-medium">PII 마스킹 방어건수</span>
+            <span className="text-xs font-medium">누적 절감 시간</span>
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
           </div>
-          <p className="text-2xl font-bold text-emerald-300 font-mono">1 <span className="text-xs text-slate-400 font-sans">건</span></p>
-          <p className="text-[11px] text-emerald-400">Fail-Closed 2조건 AND 검증 완료</p>
+          <p className="text-2xl font-bold text-emerald-300 font-mono">
+            {summary ? summary.saved_time_minutes : '—'}{' '}
+            <span className="text-xs text-slate-400 font-sans">분</span>
+          </p>
+          <p className="text-[11px] text-emerald-400">
+            딥링크 열람 {summary ? summary.deeplink_clicks_count : 0}회 · 200~250 WPM 기준
+          </p>
         </div>
       </div>
 
@@ -83,6 +157,12 @@ export const DashboardPage: React.FC = () => {
             <ArrowUpRight className="w-3.5 h-3.5" />
           </button>
         </div>
+
+        {files.length === 0 && (
+          <p className="text-xs text-slate-400 py-4">
+            아직 스캔된 문서가 없습니다. 파일 탐색기에서 스캔을 실행하세요.
+          </p>
+        )}
 
         <div className="divide-y divide-slate-800">
           {files.map((file) => (
@@ -110,10 +190,10 @@ export const DashboardPage: React.FC = () => {
                   {(file.size_bytes / 1024).toFixed(1)} KB
                 </span>
                 <button
-                  onClick={() => addToast('info', `${file.file_name} 상세 매핑 정보를 확인합니다.`)}
+                  onClick={() => void handleOpenFile(file.file_id, file.file_name)}
                   className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded transition"
                 >
-                  상세 보기
+                  파일 열기
                 </button>
               </div>
             </div>

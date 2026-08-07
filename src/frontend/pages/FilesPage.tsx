@@ -1,24 +1,119 @@
 import React, { useState } from 'react';
-import { Search, RefreshCw, FileText, Filter, CheckCircle2 } from 'lucide-react';
+import { Search, RefreshCw, FileText, Filter, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
+import * as api from '../api/client';
+import { errorMessage } from '../api/client';
+import type { TaskProgressRes } from '../api/types.gen';
 import { useAppStore } from '../store/appStore';
 
+/** Parse status as File_Meta records it. Anything unrecognised falls through to a neutral badge. */
+const PARSE_STATUS_BADGES: Record<string, { label: string; className: string; icon: 'ok' | 'wait' | 'warn' }> = {
+  parsed: {
+    label: 'Parsed',
+    className: 'bg-emerald-950 text-emerald-400 border-emerald-800/60',
+    icon: 'ok',
+  },
+  pending: {
+    label: 'Pending',
+    className: 'bg-slate-800 text-slate-400 border-slate-700',
+    icon: 'wait',
+  },
+  failed: {
+    label: 'Failed',
+    className: 'bg-rose-950 text-rose-300 border-rose-800/60',
+    icon: 'warn',
+  },
+};
+
+const ParseStatusBadge: React.FC<{ status: string }> = ({ status }) => {
+  const badge = PARSE_STATUS_BADGES[status] ?? {
+    label: status,
+    className: 'bg-slate-800 text-slate-400 border-slate-700',
+    icon: 'wait' as const,
+  };
+  const Icon = badge.icon === 'ok' ? CheckCircle2 : badge.icon === 'warn' ? AlertTriangle : Clock;
+  return (
+    <span
+      className={`inline-flex items-center space-x-1 border px-2 py-0.5 rounded text-[10px] ${badge.className}`}
+    >
+      <Icon className="w-3 h-3 mr-1" /> {badge.label}
+    </span>
+  );
+};
+
 export const FilesPage: React.FC = () => {
-  const { files, addToast } = useAppStore();
+  const { files, currentWorkspace, isReady, addToast, refreshFiles } = useAppStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [isScanning, setIsScanning] = useState(false);
+  const [progress, setProgress] = useState<TaskProgressRes | null>(null);
 
   const filteredFiles = files.filter((f) =>
     f.file_name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleRunScan = () => {
+  /**
+   * Scan, then fast-analyse, polling each task to a terminal state (DEC-04).
+   *
+   * Sequential rather than concurrent: fast analysis scores the rows the scan writes, so
+   * starting both at once would score whatever happened to be committed already.
+   */
+  const handleRunScan = async () => {
+    if (!currentWorkspace) {
+      addToast('warning', '먼저 워크스페이스를 선택하세요.');
+      return;
+    }
+    const workspaceId = currentWorkspace.workspace_id;
     setIsScanning(true);
-    addToast('info', '워크스페이스 파일 스캔 및 고속 분석을 시작합니다...');
-    setTimeout(() => {
+    setProgress(null);
+    try {
+      addToast('info', '워크스페이스 파일 스캔을 시작합니다...');
+      const scanTask = await api.startScan(workspaceId);
+      const scanDone = await api.pollTask(scanTask.task_id, { onProgress: setProgress });
+      if (scanDone.status === 'failed') {
+        // DEC-03: the code, not a stack trace. SCAN_LIMIT_REACHED is the 10,000-file guard.
+        addToast('error', `스캔이 실패했습니다 (${scanDone.error_code ?? 'INTERNAL_ERROR'}).`);
+        return;
+      }
+      // Files land in the DB at scan time, so show them before analysis starts.
+      await refreshFiles();
+
+      addToast('info', '중요도 고속 분석을 시작합니다...');
+      const analysisTask = await api.startFastAnalysis(workspaceId);
+      const analysisDone = await api.pollTask(analysisTask.task_id, { onProgress: setProgress });
+      if (analysisDone.status === 'failed') {
+        addToast('error', `분석이 실패했습니다 (${analysisDone.error_code ?? 'INTERNAL_ERROR'}).`);
+        return;
+      }
+      await refreshFiles();
+
+      if (analysisDone.status === 'multi_status') {
+        // DEC-16: a partially failed batch must never read as a plain success.
+        addToast('warning', '일부 파일의 분석이 실패했습니다. 재실행하면 실패한 파일만 처리됩니다.');
+      } else {
+        addToast('success', `스캔 및 중요도 분석 완료 (${analysisDone.processed}건).`);
+      }
+    } catch (err) {
+      addToast('error', errorMessage(err));
+    } finally {
       setIsScanning(false);
-      addToast('success', '스캔 및 중요도 가중치 업데이트가 완료되었습니다.');
-    }, 1500);
+      setProgress(null);
+    }
   };
+
+  const handleOpenFile = async (fileId: string, fileName: string) => {
+    if (!currentWorkspace) {
+      return;
+    }
+    try {
+      // DEC-08: the server resolves current_path from file_id; the client never sends a path.
+      await api.openDeepLink(currentWorkspace.workspace_id, { file_id: fileId });
+    } catch (err) {
+      addToast('error', `${fileName}: ${errorMessage(err)}`);
+    }
+  };
+
+  if (!isReady) {
+    return <div className="p-6 text-xs text-slate-400">파일 목록을 불러오는 중입니다...</div>;
+  }
 
   return (
     <div className="p-6 space-y-6 overflow-y-auto h-full">
@@ -31,14 +126,37 @@ export const FilesPage: React.FC = () => {
         </div>
 
         <button
-          onClick={handleRunScan}
-          disabled={isScanning}
+          onClick={() => void handleRunScan()}
+          disabled={isScanning || !currentWorkspace}
           className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-lg transition"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
           <span>{isScanning ? '스캔 중...' : '재스캔 및 분석 실행'}</span>
         </button>
       </div>
+
+      {/* Task progress, from the 1s poll (DEC-04). Non-blocking, not a modal. */}
+      {progress && (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-300 font-medium">
+              {progress.task_type === 'scan' ? '파일 스캔' : '중요도 고속 분석'} 진행 중
+            </span>
+            <span className="font-mono text-indigo-300">
+              {progress.processed} / {progress.total} ({progress.percent.toFixed(1)}%)
+            </span>
+          </div>
+          <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-indigo-500 transition-all"
+              style={{ width: `${Math.min(100, progress.percent)}%` }}
+            />
+          </div>
+          {progress.eta_sec !== null && progress.eta_sec !== undefined && (
+            <p className="text-[11px] text-slate-400">예상 남은 시간 {progress.eta_sec}초</p>
+          )}
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="flex items-center space-x-3 bg-slate-900/80 p-3 rounded-xl border border-slate-800">
@@ -96,22 +214,28 @@ export const FilesPage: React.FC = () => {
                 </td>
                 <td className="p-3.5 font-mono text-slate-400">{(file.size_bytes / 1024).toFixed(1)} KB</td>
                 <td className="p-3.5">
-                  <span className="inline-flex items-center space-x-1 bg-emerald-950 text-emerald-400 border border-emerald-800/60 px-2 py-0.5 rounded text-[10px]">
-                    <CheckCircle2 className="w-3 h-3 mr-1" /> Ready
-                  </span>
+                  <ParseStatusBadge status={file.parse_status} />
                 </td>
                 <td className="p-3.5 text-right">
                   <button
-                    onClick={() => addToast('info', `${file.file_name} 위치: ${file.current_path}`)}
+                    onClick={() => void handleOpenFile(file.file_id, file.file_name)}
                     className="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded transition"
                   >
-                    경로 확인
+                    파일 열기
                   </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+
+        {filteredFiles.length === 0 && (
+          <p className="p-4 text-xs text-slate-400">
+            {files.length === 0
+              ? '스캔된 파일이 없습니다. 재스캔 및 분석을 실행하세요.'
+              : '검색 조건에 맞는 파일이 없습니다.'}
+          </p>
+        )}
       </div>
     </div>
   );

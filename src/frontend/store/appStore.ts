@@ -1,29 +1,30 @@
 import { create } from 'zustand';
 
+import * as api from '../api/client';
+import { errorMessage } from '../api/client';
+import type { FileItemRes, WorkspaceItemRes } from '../api/types.gen';
+
 export interface ToastMessage {
   id: string;
   type: 'info' | 'success' | 'warning' | 'error';
   message: string;
 }
 
-export interface WorkspaceItem {
-  workspace_id: string;
-  workspace_name: string;
-  root_path: string;
-}
+/**
+ * DEC-02 makes the OpenAPI schema the contract SSOT, so the workspace and file shapes are the
+ * generated ones. The hand-written `WorkspaceItem`/`FileItem` pair that used to live here was
+ * the drift issue #91 removes; re-adding a local shape re-adds the drift.
+ */
+export type WorkspaceItem = WorkspaceItemRes;
+export type FileItem = FileItemRes;
 
-export interface FileItem {
-  file_id: string;
-  file_name: string;
-  extension: string;
-  importance_score: number;
-  current_path: string;
-  size_bytes: number;
-}
+export type LlmMode = 'Option A' | 'Option B';
+
+export type ActiveTab = 'dashboard' | 'files' | 'wiki' | 'rename' | 'settings';
 
 interface AppState {
-  activeTab: 'dashboard' | 'files' | 'wiki' | 'rename' | 'settings';
-  setActiveTab: (tab: 'dashboard' | 'files' | 'wiki' | 'rename' | 'settings') => void;
+  activeTab: ActiveTab;
+  setActiveTab: (tab: ActiveTab) => void;
 
   workspaces: WorkspaceItem[];
   currentWorkspace: WorkspaceItem | null;
@@ -33,60 +34,41 @@ interface AppState {
   files: FileItem[];
   setFiles: (files: FileItem[]) => void;
 
+  /** True while a backend read is in flight, so pages can distinguish "empty" from "not yet". */
+  isLoading: boolean;
+  /** False until the first bootstrap attempt settles, success or failure. */
+  isReady: boolean;
+
   toasts: ToastMessage[];
-  addToast: (type: 'info' | 'success' | 'warning' | 'error', message: string) => void;
+  addToast: (type: ToastMessage['type'], message: string) => void;
   removeToast: (id: string) => void;
 
-  llmMode: 'Option A' | 'Option B';
-  setLlmMode: (mode: 'Option A' | 'Option B') => void;
+  llmMode: LlmMode;
+  setLlmMode: (mode: LlmMode) => void;
+
+  /** Load the workspace list and the selected workspace's files. Called once on mount. */
+  bootstrap: () => Promise<void>;
+  /** Re-read the current workspace's files, e.g. after a scan task completes. */
+  refreshFiles: () => Promise<void>;
+  selectWorkspace: (workspaceId: string) => Promise<void>;
 }
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   activeTab: 'dashboard',
   setActiveTab: (tab) => set({ activeTab: tab }),
 
-  workspaces: [
-    {
-      workspace_id: 'ws-demo-001',
-      workspace_name: '2026_전략기획_워크스페이스',
-      root_path: 'C:\\CorpBrain\\Workspace',
-    },
-  ],
-  currentWorkspace: {
-    workspace_id: 'ws-demo-001',
-    workspace_name: '2026_전략기획_워크스페이스',
-    root_path: 'C:\\CorpBrain\\Workspace',
-  },
+  // No seeded workspace or file rows. Everything below comes from the backend; a mock row here
+  // is indistinguishable from real data in the UI, which is how #91 went unnoticed.
+  workspaces: [],
+  currentWorkspace: null,
   setWorkspaces: (workspaces) => set({ workspaces }),
   setCurrentWorkspace: (currentWorkspace) => set({ currentWorkspace }),
 
-  files: [
-    {
-      file_id: 'f1-uuid-111',
-      file_name: '2026년_사업기획서_최종.docx',
-      extension: '.docx',
-      importance_score: 80,
-      current_path: 'C:\\CorpBrain\\Workspace\\2026년_사업기획서_최종.docx',
-      size_bytes: 35840,
-    },
-    {
-      file_id: 'f2-uuid-222',
-      file_name: '홍길동_주민등록증_900101-1234567.pdf',
-      extension: '.pdf',
-      importance_score: 45,
-      current_path: 'C:\\CorpBrain\\Workspace\\홍길동_주민등록증_900101-1234567.pdf',
-      size_bytes: 124000,
-    },
-    {
-      file_id: 'f3-uuid-333',
-      file_name: '임시_아이디어_노트.txt',
-      extension: '.txt',
-      importance_score: 10,
-      current_path: 'C:\\CorpBrain\\Workspace\\임시_아이디어_노트.txt',
-      size_bytes: 2048,
-    },
-  ],
+  files: [],
   setFiles: (files) => set({ files }),
+
+  isLoading: false,
+  isReady: false,
 
   toasts: [],
   addToast: (type, message) => {
@@ -100,4 +82,58 @@ export const useAppStore = create<AppState>((set) => ({
 
   llmMode: 'Option A',
   setLlmMode: (llmMode) => set({ llmMode }),
+
+  bootstrap: async () => {
+    set({ isLoading: true });
+    try {
+      const [workspaceList, llmConfig] = await Promise.all([
+        api.listWorkspaces(),
+        // Reflects the persisted mode, not a UI default — an engine change is a security
+        // decision (DEC-16) and must not appear to have happened because a tab rendered.
+        api.getLlmConfig(),
+      ]);
+      const workspaces = workspaceList.items;
+      const current = workspaces[0] ?? null;
+      set({
+        workspaces,
+        currentWorkspace: current,
+        llmMode: llmConfig.mode === 'Option B' ? 'Option B' : 'Option A',
+      });
+      if (current) {
+        const fileList = await api.listFiles(current.workspace_id);
+        set({ files: fileList.items });
+      }
+    } catch (err) {
+      get().addToast('error', errorMessage(err));
+    } finally {
+      set({ isLoading: false, isReady: true });
+    }
+  },
+
+  refreshFiles: async () => {
+    const current = get().currentWorkspace;
+    if (!current) {
+      return;
+    }
+    set({ isLoading: true });
+    try {
+      const fileList = await api.listFiles(current.workspace_id);
+      set({ files: fileList.items });
+    } catch (err) {
+      get().addToast('error', errorMessage(err));
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  selectWorkspace: async (workspaceId) => {
+    const target = get().workspaces.find((ws) => ws.workspace_id === workspaceId);
+    if (!target) {
+      return;
+    }
+    // Clear the outgoing workspace's files first: rendering them under the new workspace's
+    // name would attribute one workspace's documents to another.
+    set({ currentWorkspace: target, files: [] });
+    await get().refreshFiles();
+  },
 }));

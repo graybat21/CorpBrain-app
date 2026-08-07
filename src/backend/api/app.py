@@ -503,8 +503,14 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         from src.backend.services.rename_service import RenameService
         files = app.state.scanner_service.file_repo.list_by_workspace(workspace_id)
         rs = RenameService(db_mgr)
-        diff_items = rs.process_rename_suggestions(workspace_id, files)
-        return ApiResponse.success(RenameDiffRes(workspace_id=workspace_id, items=diff_items))
+        # history_id comes back with the items because DEC-08 keeps absolute paths off the
+        # client: the frontend applies a diff by handing this id back, not by sending paths.
+        diff = rs.generate_rename_diff(workspace_id, files)
+        return ApiResponse.success(RenameDiffRes(
+            workspace_id=workspace_id,
+            items=diff["items"],
+            history_id=diff["history_id"],
+        ))
 
     def _rename_task_result(res: Dict[str, Any]) -> Dict[str, Any]:
         """

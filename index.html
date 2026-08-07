@@ -5,9 +5,20 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CorpBrain - 기업 문서 기획 & LLM 관리 지능</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!--
+      No webfont link here, deliberately.
+
+      This file is embedded in the exe by PyInstaller `--add-data`, so anything it references is
+      fetched by the shipped app. Three tags used to load the Inter webfont from a public CDN:
+      a fourth outbound destination that never passes NetworkGuard (DEC-15 allows exactly three
+      purpose/destination pairs) and an unconditional callout on every launch, which REQ-NF-005
+      and the Zero-Telemetry requirement forbid. On a closed network it also cost a DNS timeout
+      before the first paint, for a font that would never arrive.
+
+      Typography now comes from `font-sans` in tailwind.config.js, whose default stack starts
+      with the OS UI font — the correct choice for a desktop shell regardless. Adding a webfont
+      back requires bundling the .woff2 locally, never a CDN link.
+    -->
   </head>
   <body class="bg-dark-bg text-slate-100 font-sans antialiased select-none overflow-hidden h-screen w-screen">
     <div id="root" class="h-full w-full flex flex-col"></div>

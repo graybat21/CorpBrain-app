@@ -236,6 +236,10 @@ class RenameDiffItemRes(BaseModel):
 class RenameDiffRes(BaseModel):
     workspace_id: str
     items: List[RenameDiffItemRes]
+    # The Rename_History row this diff was persisted as. The client applies the diff by
+    # returning this id: DEC-08 keeps absolute paths off the client, so it cannot build the
+    # path pairs `apply_rename` needs. None when no file produced a `pending` suggestion.
+    history_id: Optional[str] = None
 
 
 class PendingRenameDiffItemRes(BaseModel):
