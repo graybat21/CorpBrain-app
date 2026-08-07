@@ -309,4 +309,83 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         summary = svc.get_analytics_summary(workspace_id, from_time=from_time, to_time=to_time)
         return ApiResponse.success(summary)
 
+    # --- DeepLink Open Endpoint (DL-CMD-02) ---
+
+    @app.post("/api/v1/workspace/{workspace_id}/deeplink/open")
+    def deeplink_open_file_endpoint(workspace_id: str, payload: Dict[str, Any]):
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+        file_id = payload.get("file_id")
+        if not file_id:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse[None].fail("INVALID_INPUT", "file_id is required").model_dump(),
+            )
+        from src.backend.services.deeplink_service import DeepLinkService
+        svc = DeepLinkService(db_mgr)
+        result = svc.open_file(workspace_id, file_id)
+        if result.get("status") == "error":
+            code = result.get("error_code", "UNKNOWN")
+            http_status = status.HTTP_404_NOT_FOUND if code == "NOT_FOUND" else status.HTTP_422_UNPROCESSABLE_ENTITY
+            return JSONResponse(
+                status_code=http_status,
+                content=ApiResponse[None].fail(code, result.get("message", "")).model_dump(),
+            )
+        return ApiResponse.success(result)
+
+    # --- DeepLink Query Endpoint (DL-QRY-01) ---
+
+    @app.get("/api/v1/workspace/{workspace_id}/deeplink/status")
+    def deeplink_status_endpoint(workspace_id: str, file_id: str):
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+        from src.backend.services.query_services import DeepLinkQueryService
+        svc = DeepLinkQueryService(db_mgr)
+        result = svc.check_deeplink_status(workspace_id, file_id)
+        return ApiResponse.success(result)
+
+    # --- Scan Query Endpoint (SCAN-QRY-01) ---
+
+    @app.get("/api/v1/workspace/{workspace_id}/scan/summary")
+    def scan_summary_endpoint(workspace_id: str):
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+        from src.backend.services.query_services import ScanQueryService
+        svc = ScanQueryService(db_mgr)
+        return ApiResponse.success(svc.get_scan_summary(workspace_id))
+
+    # --- Rename Diff Query Endpoint (RN-QRY-01) ---
+
+    @app.get("/api/v1/workspace/{workspace_id}/rename/diff")
+    def rename_diff_query_endpoint(workspace_id: str):
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+        from src.backend.services.query_services import RenameQueryService
+        svc = RenameQueryService(db_mgr)
+        return ApiResponse.success(svc.get_pending_rename_diff(workspace_id))
+
+    # --- Workspace List & Detail Query Endpoints (WS-QRY-01) ---
+
+    @app.get("/api/v1/workspaces")
+    def list_all_workspaces_endpoint():
+        from src.backend.services.query_services import WorkspaceQueryService
+        svc = WorkspaceQueryService(db_mgr)
+        return ApiResponse.success(svc.list_workspaces())
+
     return app

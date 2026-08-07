@@ -60,3 +60,43 @@ class DeepLinkService:
         if not row:
             return None
         return row["current_path"]
+
+    def open_file(self, workspace_id: str, file_id: str) -> Dict[str, Any]:
+        """
+        DL-CMD-02 / REQ-FUNC-021 / DEC-08:
+        Opens the file associated with file_id using os.startfile().
+        - Only accepts file_id, never a raw path (path injection prevention).
+        - Resolves current_path via Late Binding from File_Meta at call time.
+        - Returns DEC-03 compliant error codes on failure.
+        """
+        import os
+        path = self.resolve_deeplink_path(workspace_id, file_id)
+
+        if path is None:
+            return {
+                "status": "error",
+                "error_code": "NOT_FOUND",
+                "message": f"file_id '{file_id}' not found in workspace '{workspace_id}'"
+            }
+
+        if not os.path.exists(path):
+            return {
+                "status": "error",
+                "error_code": "PATH_NOT_ACCESSIBLE",
+                "message": f"File path no longer accessible: {path}"
+            }
+
+        try:
+            os.startfile(path)  # Windows OS default application launch
+            return {
+                "status": "success",
+                "file_id": file_id,
+                "opened_path": path
+            }
+        except OSError as e:
+            return {
+                "status": "error",
+                "error_code": "PATH_NOT_ACCESSIBLE",
+                "message": str(e)
+            }
+
