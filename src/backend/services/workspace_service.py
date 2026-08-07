@@ -1,10 +1,28 @@
-import os
 import logging
+import os
 from typing import Any, Dict, List, Optional
+
 from src.backend.repositories.workspace_repository import WorkspaceRepository
 from src.backend.utils.file_utils import normalize_path
 
 logger = logging.getLogger("CorpBrain.WorkspaceService")
+
+
+def _collection_absent_errors() -> tuple:
+    """
+    Exception types that mean "that collection isn't there", for the deletion path.
+
+    chromadb is imported lazily and defensively: this service must stay usable with a
+    duck-typed vector store (and in a process that never touches Chroma), so an import failure
+    degrades to KeyError/ValueError rather than breaking workspace deletion outright.
+    """
+    absent: tuple = (KeyError, ValueError)
+    try:
+        from chromadb.errors import NotFoundError
+        absent = (NotFoundError,) + absent
+    except ImportError:
+        pass
+    return absent
 
 
 class WorkspaceService:
@@ -44,8 +62,13 @@ class WorkspaceService:
             collection_name = f"ws_{workspace_id}"
             try:
                 self.vector_store.delete_collection(collection_name)
-            except Exception as e:
-                logger.info(f"ChromaDB collection '{collection_name}' not found or already deleted: {e}")
+            except _collection_absent_errors() as e:
+                # Narrowed from a bare `except Exception` (CLAUDE.md: no silent failures).
+                # An absent collection is benign — a workspace analysed zero files never had
+                # one. Any other error must propagate: swallowing it would delete the SQLite
+                # row while leaving the vectors behind, stranding them permanently since
+                # nothing else knows that collection name.
+                logger.info(f"ChromaDB collection '{collection_name}' already absent: {type(e).__name__}")
 
         # Step 2: Delete SQLite Workspace_Meta row
         return self.repo.delete(workspace_id)

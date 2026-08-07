@@ -132,6 +132,32 @@ def test_scenario_3_file_moved_event_preserves_file_id(wa_setup):
     assert row["file_name"] == "moved_watch_doc1.txt"
 
 
+def test_scenario_5_deleted_file_vectors_are_cleaned_up(wa_setup):
+    """
+    DEC-09: a file gone from disk must have its vectors dropped, not just be skipped.
+
+    The old early-return leaked an orphan vector set on every deletion. That was invisible
+    while the store was in-memory; with a persisted store the orphans keep surfacing in
+    search results.
+    """
+    watcher, db_mgr, file_repo, ws_id, tmpdir, f1, f1_id = wa_setup
+    vector_db = watcher.deep_analysis_service.vector_db
+
+    with open(f1, "w", encoding="utf-8") as f:
+        f.write("Content that will be indexed then deleted.\n" * 20)
+
+    watcher.enqueue_file_event(ws_id, f1_id, "modified", f1)
+    watcher.process_next_queued_item()
+    assert vector_db.count_chunks(f1_id) > 0
+
+    os.remove(f1)
+    watcher.enqueue_file_event(ws_id, f1_id, "deleted", f1)
+    res = watcher.process_next_queued_item()
+
+    assert res["status"] == "file_not_found"
+    assert vector_db.count_chunks(f1_id) == 0
+
+
 def test_scenario_4_incremental_reanalysis_queue_processing(wa_setup):
     watcher, db_mgr, file_repo, ws_id, tmpdir, f1, f1_id = wa_setup
 

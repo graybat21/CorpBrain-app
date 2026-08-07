@@ -1,7 +1,10 @@
 import secrets
+from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
-from fastapi import FastAPI, Header, HTTPException, Request, Response, status
+
+from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
+
 from src.backend.api.dtos import (
     ApiResponse,
     FastAnalysisRes,
@@ -20,8 +23,51 @@ from src.backend.services.scanner_service import ScannerService
 from src.backend.services.workspace_service import WorkspaceService
 
 
+class _LazyVectorStore:
+    """
+    Defers VectorDBManager construction until a vector operation actually happens.
+
+    Building a Chroma PersistentClient eagerly in create_app would mean every request — and
+    every API test that only lists workspaces — pays for opening chroma.sqlite3. Admin mode
+    (workspace_id=None) is enough here: workspace deletion only ever calls delete_collection.
+    """
+
+    def __init__(self, persist_dir: str):
+        self._persist_dir = persist_dir
+        self._manager: Optional[Any] = None
+
+    def _ensure(self) -> Any:
+        if self._manager is None:
+            from src.backend.services.vector_service import VectorDBManager
+            self._manager = VectorDBManager(workspace_id=None, persist_dir=self._persist_dir)
+        return self._manager
+
+    def delete_collection(self, name: str) -> None:
+        self._ensure().delete_collection(name)
+
+    def close(self) -> None:
+        if self._manager is not None:
+            self._manager.close()
+            self._manager = None
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Release the Chroma client on shutdown so chroma.sqlite3 is not left open."""
+    yield
+    vector_store = getattr(app.state, "vector_store", None)
+    if vector_store is not None:
+        vector_store.close()
+
+
 def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional[str] = None) -> FastAPI:
-    app = FastAPI(title="CorpBrain IPC API", version="1.1.0", docs_url="/docs", redoc_url=None)
+    app = FastAPI(
+        title="CorpBrain IPC API",
+        version="1.1.0",
+        docs_url="/docs",
+        redoc_url=None,
+        lifespan=_lifespan,
+    )
 
     if db_mgr is None:
         db_mgr = DatabaseManager()
@@ -33,7 +79,12 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
 
     ws_repo = WorkspaceRepository(db_mgr)
     file_repo = FileRepository(db_mgr)
-    app.state.ws_service = WorkspaceService(ws_repo)
+    # DEC-09: workspace deletion must drop the Chroma collection before the SQLite row.
+    # Without this injection the vector cleanup step was skipped entirely in production, so
+    # every deleted workspace left its whole collection behind. Lazy so that merely creating
+    # the app (or listing workspaces) does not spin up a Chroma client.
+    app.state.vector_store = _LazyVectorStore(db_mgr.vectors_dir)
+    app.state.ws_service = WorkspaceService(ws_repo, vector_store=app.state.vector_store)
     app.state.scanner_service = ScannerService(file_repo)
 
     # Middleware: Bearer token auth check for all /api/v1/* routes (DEC-02)
@@ -184,7 +235,7 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         items = payload.get("items") if payload else None
         history_id = payload.get("history_id") if payload else None
         res = rs.apply_rename(workspace_id, items=items, history_id=history_id)
-        
+
         if res.get("status") == "multi_status":
             return JSONResponse(
                 status_code=status.HTTP_207_MULTI_STATUS,
@@ -204,7 +255,7 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         rs = RenameService(db_mgr)
         history_id = payload.get("history_id") if payload else None
         res = rs.undo_rename(workspace_id, history_id=history_id)
-        
+
         if res.get("status") == "multi_status":
             return JSONResponse(
                 status_code=status.HTTP_207_MULTI_STATUS,
@@ -237,7 +288,7 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         from src.backend.services.watcher_service import WatcherService
         if not hasattr(app.state, "watcher_service"):
             app.state.watcher_service = WatcherService(db_mgr, app.state.scanner_service.file_repo)
-        
+
         mode = payload.get("mode", "manual")
         debounce_ms = payload.get("debounce_ms", 500)
         try:
@@ -260,7 +311,7 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         from src.backend.services.watcher_service import WatcherService
         if not hasattr(app.state, "watcher_service"):
             app.state.watcher_service = WatcherService(db_mgr, app.state.scanner_service.file_repo)
-        
+
         cfg = app.state.watcher_service.get_config(workspace_id)
         q_size = app.state.watcher_service.queue.qsize()
         return ApiResponse.success({
@@ -287,7 +338,7 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         wiki_id = payload.get("wiki_id")
         tokens_used = payload.get("tokens_used", 0)
         cost_usd = payload.get("cost_usd")
-        
+
         res = svc.log_event(
             workspace_id,
             event_type=event_type,
