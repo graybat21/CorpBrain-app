@@ -6,6 +6,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 from src.backend.db import DatabaseManager
 from src.backend.pii_filter import PIIFilter, PIIMaskingFailedException
+from src.backend.utils.file_utils import derive_folder_1depth
 
 logger = logging.getLogger("CorpBrain.RenameService")
 
@@ -30,8 +31,8 @@ class RenameService:
         """
         current_path = file_meta.get("current_path", "").replace("\\", "/")
         parts = [p for p in current_path.split("/") if p]
-        
-        folder_1depth = parts[-2] if len(parts) >= 2 else "root"
+
+        folder_1depth = derive_folder_1depth(current_path)
         depth_level = len(parts)
 
         return {

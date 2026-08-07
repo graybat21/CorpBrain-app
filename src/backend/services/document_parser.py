@@ -78,7 +78,24 @@ class TextChunker:
         self.chunk_size = chunk_size
         self.overlap = overlap
 
-    def chunk_text(self, text: str, file_id: str) -> List[Dict[str, Any]]:
+    def chunk_text(
+        self,
+        text: str,
+        file_id: str,
+        *,
+        workspace_id: Optional[str] = None,
+        folder_1depth: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Split text into overlapping chunks (ANA-CMD-02).
+
+        `workspace_id` / `folder_1depth` are keyword-only with defaults so existing
+        two-positional-argument callers are unaffected. They populate the chunk metadata
+        DEC-06 requires ({workspace_id, file_id, chunk_index, folder_1depth}).
+
+        `folder_1depth` must be a bare folder NAME, not a path — derive it with
+        `file_utils.derive_folder_1depth`. DEC-08 forbids an absolute path in vector metadata.
+        """
         cleaned_text = re.sub(r"\s+", " ", text).strip()
         if not cleaned_text:
             return []
@@ -91,13 +108,15 @@ class TextChunker:
         while start < text_len:
             end = min(start + self.chunk_size, text_len)
             chunk_content = cleaned_text[start:end]
-            
+
             chunk_id = f"{file_id}:{chunk_idx}"
             chunks.append({
                 "chunk_id": chunk_id,
                 "chunk_index": chunk_idx,
                 "text": chunk_content,
-                "char_length": len(chunk_content)
+                "char_length": len(chunk_content),
+                "workspace_id": workspace_id,
+                "folder_1depth": folder_1depth,
             })
 
             chunk_idx += 1

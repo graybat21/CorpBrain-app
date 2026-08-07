@@ -22,6 +22,35 @@ class EgressBlockedError(Exception):
     pass
 
 
+class UpstreamUnavailableError(Exception):
+    """
+    The whitelisted host could not be reached, or the connection/read timed out.
+
+    DEC-16 classifies this as a *transient* failure: it is one of the conditions
+    LLMResilienceService may retry with backoff.
+    """
+    pass
+
+
+class UpstreamStatusError(Exception):
+    """
+    The whitelisted host answered with a non-2xx status.
+
+    Carries ``status_code`` so the caller can apply DEC-16's retry rule without re-parsing a
+    message string: 429 and 5xx are transient, everything else (401, 400, ...) is not and
+    must never be retried. ``retry_after`` carries the header value when the server sent one.
+
+    The response body is deliberately NOT attached — an upstream error body can echo back the
+    prompt that produced it, and DEC-14/DEC-15 forbid that reaching a log or an error response.
+    """
+
+    def __init__(self, status_code: int, purpose: str, retry_after: Optional[str] = None):
+        super().__init__(f"Upstream returned HTTP {status_code} for purpose '{purpose}'")
+        self.status_code = status_code
+        self.purpose = purpose
+        self.retry_after = retry_after
+
+
 class NetworkGuard:
     # Code constants - NEVER load from config/env (DEC-15)
     _ALLOWED: Dict[str, FrozenSet[str]] = {
@@ -49,13 +78,22 @@ class NetworkGuard:
 
     @classmethod
     def request(cls, purpose: str, method: str, url: str, **kwargs) -> Any:
-        """Issue HTTP request only after strict NetworkGuard validation."""
+        """
+        Issue an HTTP request only after strict NetworkGuard validation.
+
+        Requires httpx. The previous stdlib fallback here silently discarded **kwargs, so a
+        caller passing `json=`/`headers=`/`timeout=` got a request that dropped its body and
+        blocked forever — a lie that would surface as a mysterious upstream error rather than
+        a bug here. It has no callers, so it now fails loudly instead. Use `get_json` /
+        `post_json` for the small-JSON cases; those work without httpx.
+        """
         cls.validate_egress(purpose, url)
-        if HAS_HTTPX:
-            return httpx.request(method, url, **kwargs)
-        else:
-            req = urllib.request.Request(url, method=method.upper())
-            return urllib.request.urlopen(req)
+        if not HAS_HTTPX:
+            raise NotImplementedError(
+                "NetworkGuard.request requires httpx (see requirements.txt). "
+                "For small JSON payloads use get_json/post_json, which use the stdlib."
+            )
+        return httpx.request(method, url, **kwargs)
 
     @classmethod
     def get_json(cls, purpose: str, url: str, timeout: float = 5.0) -> Optional[Dict[str, Any]]:
@@ -85,3 +123,66 @@ class NetworkGuard:
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.warning(f"[NetworkGuard] Malformed JSON response for purpose '{purpose}': {type(e).__name__}")
             return None
+
+    @classmethod
+    def post_json(cls, purpose: str, url: str, payload: Dict[str, Any], timeout: float) -> Dict[str, Any]:
+        """
+        Validated JSON POST helper (DEC-15).
+
+        Unlike `get_json`, this RAISES instead of returning None. The difference is
+        deliberate: `get_json` covers health probes where "no answer" is a legitimate answer
+        ("Ollama isn't running"), whereas a POST is a real operation whose failure the caller
+        must be able to classify. DEC-16 requires distinguishing retryable from
+        non-retryable, and a bare None cannot carry a status code.
+
+        `timeout` is required — no default. Timeout values live in App_Config
+        (`llm_timeout_*`) and DEC-16 forbids hardcoding them, so a default here would just be
+        a hardcoded value hiding one call away from the rule.
+
+        Raises:
+            EgressBlockedError: host/purpose pair not whitelisted; NO request is issued.
+            UpstreamUnavailableError: unreachable or timed out (transient, DEC-16).
+            UpstreamStatusError: non-2xx response; inspect `.status_code` to classify.
+            ValueError: 2xx response whose body is not valid JSON.
+        """
+        cls.validate_egress(purpose, url)
+
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json", "User-Agent": "CorpBrain"},
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                status = getattr(resp, "status", 200)
+                raw = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as e:
+            # HTTPError is a subclass of URLError, so it must be caught first. `from None`
+            # on every re-raise below: the chained original carries the full URL (query
+            # string included) into the traceback, and DEC-15 permits logging host+purpose
+            # only. Never read e.read() — an error body can echo the prompt (DEC-14).
+            retry_after = None
+            try:
+                retry_after = e.headers.get("Retry-After") if e.headers else None
+            except AttributeError:
+                retry_after = None
+            logger.warning(f"[NetworkGuard] Upstream HTTP {e.code} for purpose '{purpose}'")
+            raise UpstreamStatusError(e.code, purpose, retry_after) from None
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            logger.info(f"[NetworkGuard] Unreachable host for purpose '{purpose}': {type(e).__name__}")
+            raise UpstreamUnavailableError(
+                f"Upstream unavailable for purpose '{purpose}': {type(e).__name__}"
+            ) from None
+
+        if not (200 <= status < 300):
+            logger.warning(f"[NetworkGuard] Unexpected status {status} for purpose '{purpose}'")
+            raise UpstreamStatusError(status, purpose)
+
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            logger.warning(f"[NetworkGuard] Malformed JSON response for purpose '{purpose}': {type(e).__name__}")
+            raise ValueError(f"Malformed JSON response for purpose '{purpose}'") from None
