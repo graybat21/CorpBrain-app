@@ -1,3 +1,4 @@
+import logging
 import os
 import sqlite3
 import threading
@@ -7,11 +8,17 @@ from typing import Generator, Optional
 
 from src.backend.utils.app_paths import get_db_path, vectors_dir_for_db
 
+logger = logging.getLogger("CorpBrain.DatabaseManager")
+
 
 class DatabaseManager:
-    _local = threading.local()
-
     def __init__(self, db_path: Optional[str] = None, migrations_dir: Optional[str] = None):
+        # Per-instance rather than a class attribute: `_local` used to be shared by every
+        # DatabaseManager, so two managers pointing at different db_path values in the same
+        # thread handed out the SAME connection — the second silently read and wrote the
+        # first one's database. Harmless while each test closed its manager before the next
+        # was built; not harmless now that DEC-04 task workers run concurrently.
+        self._local = threading.local()
         self._all_connections = set()
         self._lock = threading.Lock()
 
@@ -53,6 +60,29 @@ class DatabaseManager:
             with self._lock:
                 self._all_connections.add(conn)
         return self._local.conn
+
+    def release_thread_connection(self):
+        """
+        Close and forget only the calling thread's connection.
+
+        A DEC-04 worker thread must call this when it finishes, or its sqlite3 connection
+        lives until process exit — WAL readers hold the -wal file open, which on Windows
+        blocks deleting the database directory (WinError 32) and in the app keeps a stale
+        snapshot alive. `close()` cannot do this job: sqlite3 connections may not be closed
+        from a thread other than the one that opened them.
+        """
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            return
+        with self._lock:
+            self._all_connections.discard(conn)
+        self._local.conn = None
+        try:
+            conn.close()
+        except sqlite3.Error:
+            # Already closed, or closed from the wrong thread. Not worth propagating from a
+            # cleanup path, but never swallowed silently.
+            logger.debug("Thread connection close failed; it was already unusable.", exc_info=True)
 
     def close(self):
         with self._lock:
@@ -106,11 +136,20 @@ class DatabaseManager:
                 current_version = version_num
 
     def recover_interrupted_tasks(self):
-        """DEC-04: Transition any stranded 'running' tasks to 'interrupted' upon boot."""
+        """
+        DEC-04: transition tasks stranded by a crash to 'interrupted' at boot.
+
+        Covers 'queued' as well as 'running'. A queued task is one whose row was committed
+        before the 202 was returned but whose worker never started — leaving it 'queued'
+        means it stays live forever, so the frontend polls a task that will never advance and
+        `list_interrupted()` never offers it for resume.
+
+        Never auto-resumes: the user is asked first (DEC-04). This only relabels state.
+        """
         try:
             with self.transaction() as conn:
                 conn.execute(
-                    "UPDATE Async_Task SET status = 'interrupted', updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now')) WHERE status = 'running';"
+                    "UPDATE Async_Task SET status = 'interrupted', updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now')) WHERE status IN ('running', 'queued');"
                 )
         except sqlite3.OperationalError:
             # If table doesn't exist yet before migration
