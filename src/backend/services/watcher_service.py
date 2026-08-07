@@ -4,6 +4,7 @@ import os
 import queue
 import threading
 import time
+import uuid
 from typing import Any, Dict, Optional
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
@@ -261,9 +262,13 @@ class WatcherService:
             size = os.path.getsize(path) if os.path.exists(path) else 0
             mtime = os.path.getmtime(path) if os.path.exists(path) else time.time()
 
+            # DEC-11: UUID → TEXT (36-char hyphenated lowercase). Issue #84 — this was the only
+            # path generating non-UUID file_id, breaking deeplink anchors and violating the
+            # project-wide convention (scanner_service, rename_service, analytics_service all use
+            # str(uuid.uuid4())).
             upsert_data = [{
                 "workspace_id": workspace_id,
-                "file_id": f"file_{int(time.time()*1000)}",
+                "file_id": str(uuid.uuid4()),
                 "current_path": path,
                 "original_path": path,
                 "file_name": fname,
