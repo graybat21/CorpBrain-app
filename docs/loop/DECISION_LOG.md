@@ -23,6 +23,13 @@ MINOR: 0
 | 5 | CORE | — | 로컬 API 서버 포트 `8000` 및 세션 토큰 문자열 하드코딩 (`run_app.py`) | DEC-02 위반. 규격은 `port=0` OS 할당 + `secrets.token_urlsafe(32)`. 고정 토큰은 소스에 평문 상주 |
 | 6 | CORE | — | FastAPI 전역 예외 핸들러 미구성 (`src/backend/api/app.py`, `@app.exception_handler` 0건) | DEC-03 위반. FastAPI 기본 `{"detail": ...}` 가 봉투 규격을 우회해 그대로 누출. 스택트레이스·절대경로 유출 경로가 열려 있음 |
 
+## 해소 기록
+
+| # | 상태 | 해소 커밋 / PR | 비고 |
+|---|------|----------------|------|
+| 1 | **RESOLVED** | `39f67de` (Phase 4) + `e9cd5b6` (Phase 5) — 이슈 #16 / PR | 인메모리 `dict` → `chromadb.PersistentClient`. `ws_<workspace_id>` 코사인 컬렉션, `OllamaEmbeddingFunction` 명시 주입(기본 ONNX EF 도달 불가를 테스트로 고정), DEC-09 삭제→upsert 순서·`f"{file_id}:{chunk_index}"` ID·lazy delete 구현. 배선 누락 2건(워크스페이스 삭제 시 벡터 정리 미실행, 파일 삭제 시 고아 벡터 잔존)도 함께 해소. 78 → 113 passed. **잔여**: AC S3 동의 UI/엔드포인트는 후속 이슈(강제·차단 로직은 완료), AC S2 실측은 이 PC 에 Ollama 미설치로 미수행 |
+| 3 | **RESOLVED** | PR #86 (이슈 #32) | `urllib.request` 직접 import 제거 + `validate_egress` 인자 순서 수정 |
+
 ## 재발 방지 (다음 루프 적용 조건)
 
 1. **구현 코드 변경이 0줄인 PR은 생성하지 않는다.** (Draft PR #73~#83 11건이 정확히 이 경로에서 나왔다 — 각 브랜치가 `main` 과 보고서 `.md` 1개만 다름)
