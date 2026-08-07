@@ -1,6 +1,6 @@
 import logging
 import time
-from typing import Callable, Any, List, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("CorpBrain.LLMResilience")
 
@@ -86,7 +86,10 @@ class LLMResilienceService:
         for f in files:
             file_id = f.get("file_id", "unknown")
             try:
-                self.execute_with_retry(lambda: process_file_func(f), file_id=file_id)
+                # Bind the loop variable explicitly. The lambda is invoked inside this same
+                # iteration so late binding is harmless today, but a future change that defers
+                # the call would silently process the last file N times.
+                self.execute_with_retry(lambda f=f: process_file_func(f), file_id=file_id)
                 succeeded.append(file_id)
             except LLMUnavailableException as ue:
                 logger.error(f"[LLMResilience] Aborting batch due to circuit breaker: {ue}")

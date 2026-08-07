@@ -1,16 +1,17 @@
 import os
 import tempfile
-import pytest
 from unittest.mock import patch
+
+import pytest
+
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
 from src.backend.repositories.workspace_repository import WorkspaceRepository
 from src.backend.services.deeplink_service import DeepLinkService
 from src.backend.services.query_services import (
-    WorkspaceQueryService,
-    ScanQueryService,
     DeepLinkQueryService,
-    RenameQueryService,
+    ScanQueryService,
+    WorkspaceQueryService,
 )
 
 

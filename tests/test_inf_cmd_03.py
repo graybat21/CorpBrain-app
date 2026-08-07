@@ -1,5 +1,6 @@
 import pytest
-from src.backend.network_guard import NetworkGuard, EgressBlockedError
+
+from src.backend.network_guard import EgressBlockedError, NetworkGuard
 
 
 def test_scenario_1_allowed_destination_passes():

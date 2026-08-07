@@ -1,5 +1,4 @@
-import pytest
-from src.backend.pii_filter import PIIFilter, PIIMaskingFailedException, MaskedResult
+from src.backend.pii_filter import MaskedResult, PIIFilter
 
 
 def test_scenario_1_pii_masking_phone_and_rrn():

@@ -1,7 +1,5 @@
-import pytest
 from src.backend.services.llm_resilience_service import (
     LLMResilienceService,
-    LLMUnavailableException,
 )
 
 

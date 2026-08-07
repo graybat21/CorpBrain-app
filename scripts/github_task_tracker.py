@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import sys
 import subprocess
+import sys
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -77,7 +77,7 @@ def resolve_issue_number(target: str) -> int:
 def start_task(target: str):
     issue_num = resolve_issue_number(target)
     print(f"🔄 [Task Tracker] Transitioning Task {target} (Issue #{issue_num}) -> IN PROGRESS")
-    
+
     # 1) Add 'in-progress' label to Issue
     cmd_label = [
         "gh", "issue", "edit", str(issue_num),
@@ -105,7 +105,7 @@ def start_task(target: str):
 def complete_task(target: str):
     issue_num = resolve_issue_number(target)
     print(f"✅ [Task Tracker] Transitioning Task {target} (Issue #{issue_num}) -> DONE (Closed)")
-    
+
     # Remove 'in-progress' label if present
     cmd_rm_label = [
         "gh", "issue", "edit", str(issue_num),

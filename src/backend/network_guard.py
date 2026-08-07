@@ -1,7 +1,7 @@
 import json
 import logging
-from urllib.parse import urlparse
 from typing import Any, Dict, FrozenSet, Optional
+from urllib.parse import urlparse
 
 try:
     import httpx

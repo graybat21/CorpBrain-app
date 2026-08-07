@@ -2,7 +2,7 @@ import functools
 import logging
 import os
 import sys
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 logger = logging.getLogger("CorpBrain.FileUtils")
 

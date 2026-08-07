@@ -1,5 +1,5 @@
 import sys
-import pytest
+
 from src.backend.utils.file_utils import normalize_path, safe_file_access
 
 

@@ -1,10 +1,12 @@
 import os
 import tempfile
 import urllib.error
-import pytest
 from unittest.mock import MagicMock, patch
-from src.backend.db import DatabaseManager
+
+import pytest
+
 from src.backend.config_manager import ConfigManager
+from src.backend.db import DatabaseManager
 from src.backend.network_guard import EgressBlockedError, NetworkGuard
 from src.backend.services.query_services import LlmQueryService
 
