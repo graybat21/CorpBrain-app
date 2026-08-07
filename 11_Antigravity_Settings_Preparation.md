@@ -14,6 +14,9 @@ Antigravity의 시스템 프롬프트(User Rule)로 주입되어야 할 핵심 �
 
 ### 2.2. 데이터 정합성 및 타입 제약
 - **ID와 시간**: PK(UUID)는 **TEXT** (36자 소문자 하이픈)로, 시간은 **TEXT ISO-8601 UTC** 포맷(`YYYY-MM-DDTHH:MM:SS.ffffffZ`)으로만 저장. `ON UPDATE CURRENT_TIMESTAMP` 등 MySQL 문법 사용 금지.
+- **[GitHub Projects 실시간 수명주기 연동]**: 태스크 착수 및 완료 시 다음 스크립트를 실시간으로 실행한다.
+  - **착수 시**: `python scripts/github_task_tracker.py start <TASK_ID>` (`To Do` -> `In Progress`)
+  - **완료 시**: `python scripts/github_task_tracker.py complete <TASK_ID>` (`In Progress` -> `Done`)
 - **SSOT 원칙**: 벡터 데이터의 유일한 SSOT는 ChromaDB. SQLite와 ChromaDB의 트랜잭션을 묶을 수 없으므로, 쓰기 순서는 항상 `Chroma delete -> Chroma upsert -> SQLite commit` 순을 유지할 것.
 
 ### 2.3. 외부 네트워크 송출 및 보안 (Zero-Telemetry)

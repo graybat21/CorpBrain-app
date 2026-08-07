@@ -96,6 +96,9 @@ This file contains binding operating procedures and coding conventions for AI co
   - Replace overlapping matches back-to-front (widest match wins, merged) so offsets don't shift. Avoid nested quantifiers in every pattern (ReDoS); never assemble a pattern from user input.
   - Person and organization names are **not** masked. Surface that limit in the UI and require explicit consent on the first Option A transmission; do not paper over it.
 - **Rename Prompts & Path Exposure — LOCKED (SRS §6.3.3 `DEC-17`)**: The `RenameManager → LLMRouter` path is a **second cloud transmission channel**, and it uses the **same `PIIFilter` gate** as analysis chunks. **Do not write Rename-specific masking logic, a different token format, or a separate exception path.** Masking applies to **every prompt leaving for Option A** — never branch on "is this a chunk or a filename", because the branch is the bypass.
+  - **[GitHub Projects 실시간 수명주기 연동]**: 태스크 착수 및 완료 시 다음 스크립트를 수동 일괄 전환 대신 실시간으로 실행한다.
+  - **착수 시**: `python scripts/github_task_tracker.py start <TASK_ID>` (`To Do` -> `In Progress`)
+  - **완료 시**: `python scripts/github_task_tracker.py complete <TASK_ID>` (`In Progress` -> `Done`)
   - **Never put an absolute path in a prompt.** Only `file_name` + extension + **1-depth folder name** + depth count may be sent. Full `current_path`/`original_path` strings, drive letters, `C:\Users\<name>`, and UNC server names are forbidden — same principle as `DEC-08` keeping paths out of wiki markdown.
   - If the LLM response still contains a `[PII:TYPE]` token, **do not use it as a filename** — exclude that file from the diff and mark it "PII present — manual review". **Un-masking (substituting the original PII back) is forbidden.**
   - Validate suggested names against Windows forbidden characters (`\ / : * ? " < > |`), reserved device names (`CON`, `PRN`, `NUL`, `COM1`…), trailing spaces/dots, and `MAX_PATH` before offering them.
