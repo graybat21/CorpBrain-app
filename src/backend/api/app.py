@@ -206,4 +206,62 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             )
         return ApiResponse.success(res)
 
+    @app.get("/api/v1/workspace/{workspace_id}/watcher/config")
+    def get_watcher_config_endpoint(workspace_id: str):
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+        from src.backend.services.watcher_service import WatcherService
+        if not hasattr(app.state, "watcher_service"):
+            app.state.watcher_service = WatcherService(db_mgr, app.state.scanner_service.file_repo)
+        cfg = app.state.watcher_service.get_config(workspace_id)
+        return ApiResponse.success(cfg)
+
+    @app.post("/api/v1/workspace/{workspace_id}/watcher/config")
+    def update_watcher_config_endpoint(workspace_id: str, payload: Dict[str, Any]):
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+        from src.backend.services.watcher_service import WatcherService
+        if not hasattr(app.state, "watcher_service"):
+            app.state.watcher_service = WatcherService(db_mgr, app.state.scanner_service.file_repo)
+        
+        mode = payload.get("mode", "manual")
+        debounce_ms = payload.get("debounce_ms", 500)
+        try:
+            cfg = app.state.watcher_service.update_config(workspace_id, mode, debounce_ms=debounce_ms)
+            return ApiResponse.success(cfg)
+        except ValueError as e:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse[None].fail("BAD_REQUEST", str(e)).model_dump(),
+            )
+
+    @app.get("/api/v1/workspace/{workspace_id}/watcher/status")
+    def get_watcher_status_endpoint(workspace_id: str):
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+        from src.backend.services.watcher_service import WatcherService
+        if not hasattr(app.state, "watcher_service"):
+            app.state.watcher_service = WatcherService(db_mgr, app.state.scanner_service.file_repo)
+        
+        cfg = app.state.watcher_service.get_config(workspace_id)
+        q_size = app.state.watcher_service.queue.qsize()
+        return ApiResponse.success({
+            "workspace_id": workspace_id,
+            "mode": cfg["mode"],
+            "is_enabled": bool(cfg["is_enabled"]),
+            "queued_items_count": q_size
+        })
+
     return app

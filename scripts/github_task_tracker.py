@@ -27,6 +27,12 @@ TASK_MAP = {
     "DL-CMD-01": 12,
     "LLM-CMD-01": 28,
     "LLM-CMD-03": 30,
+    # Watcher & Stats
+    "WA-CMD-01": 53,
+    "WA-CMD-02": 54,
+    "WA-CMD-03": 55,
+    "WA-QRY-01": 58,
+    "STAT-CMD-01": 49,
     # Phase 4
     "API-001": 7,
     "API-002": 8,
