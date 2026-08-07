@@ -104,6 +104,13 @@ class LlmHealthCheckRes(BaseModel):
     status: str
     mode: str
     is_healthy: bool
+    # DEC-13: daemon reachability and per-model presence are reported separately —
+    # a live daemon with no models still cannot run analysis, so these are never merged.
+    api_key_configured: bool = False
+    daemon_online: bool = False
+    embedding_model_ready: bool = False
+    generation_model_ready: bool = False
+    error_code: Optional[str] = None
 
 
 class RenameDiffRes(BaseModel):

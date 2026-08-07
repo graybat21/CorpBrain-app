@@ -1,3 +1,4 @@
+import json
 import logging
 from urllib.parse import urlparse
 from typing import Any, Dict, FrozenSet, Optional
@@ -7,7 +8,11 @@ try:
     HAS_HTTPX = True
 except ImportError:
     HAS_HTTPX = False
-    import urllib.request
+
+# urllib is imported unconditionally as the stdlib fallback transport.
+# DEC-15: this module is the ONLY place allowed to import a network library.
+import urllib.error
+import urllib.request
 
 logger = logging.getLogger("CorpBrain.NetworkGuard")
 
@@ -51,3 +56,32 @@ class NetworkGuard:
         else:
             req = urllib.request.Request(url, method=method.upper())
             return urllib.request.urlopen(req)
+
+    @classmethod
+    def get_json(cls, purpose: str, url: str, timeout: float = 5.0) -> Optional[Dict[str, Any]]:
+        """
+        Validated JSON GET helper (DEC-15).
+
+        Callers must never import a network library themselves, so this method exists to
+        cover the common "read a small JSON document" case (e.g. Ollama's GET /api/tags).
+
+        Returns the decoded object on HTTP 200, or None when the host is unreachable,
+        answers with a non-200 status, or returns a body that is not valid JSON.
+        An EgressBlockedError from validation is NOT swallowed — a whitelist violation is a
+        programming error, not a transient network condition (DEC-16: never retry it either).
+        """
+        cls.validate_egress(purpose, url)
+
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "CorpBrain"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if getattr(resp, "status", None) != 200:
+                    return None
+                return json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
+            # Never log the URL's query string or any body — host+purpose only (DEC-15).
+            logger.info(f"[NetworkGuard] Unreachable host for purpose '{purpose}': {type(e).__name__}")
+            return None
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            logger.warning(f"[NetworkGuard] Malformed JSON response for purpose '{purpose}': {type(e).__name__}")
+            return None

@@ -134,3 +134,73 @@ class RenameQueryService:
                 "status": row["status"]
             })
         return diff_list
+
+
+class LlmQueryService:
+    """LLM-QRY-01: 선택된 엔진(Cloud/Ollama) 연결 상태 확인 (Health Check) (REQ-FUNC-011, DEC-12, DEC-13)"""
+
+    # Ollama exposes its installed-model list here (DEC-13). Loopback only.
+    OLLAMA_TAGS_URL = "http://127.0.0.1:11434/api/tags"
+
+    def __init__(self, db_mgr: DatabaseManager, network_guard: Optional[Any] = None):
+        from src.backend.config_manager import ConfigManager
+        self.db_mgr = db_mgr
+        self.config_mgr = ConfigManager(db_mgr)
+        # DEC-15: all egress goes through NetworkGuard. Default to the real guard rather
+        # than None so the validated path is what actually runs in production.
+        if network_guard is None:
+            from src.backend.network_guard import NetworkGuard
+            network_guard = NetworkGuard
+        self.network_guard = network_guard
+
+    def check_health(self) -> Dict[str, Any]:
+        mode = self.config_mgr.get("llm_mode", "Option A")
+        api_key_configured = self.config_mgr.is_api_key_configured()
+
+        embed_model = self.config_mgr.get("local_embedding_model", "nomic-embed-text")
+        gen_model = self.config_mgr.get("local_generation_model", "qwen2.5:7b-instruct")
+        embedding_timeout = float(self.config_mgr.get("llm_health_timeout", "5"))
+
+        # DEC-13: the embedding model is required by EVERY user, including Option A
+        # (DEC-06 routes all embeddings through local Ollama), so the tag list is always
+        # queried regardless of mode. Egress is validated by NetworkGuard (DEC-15).
+        tags = self.network_guard.get_json(
+            "llm_local", self.OLLAMA_TAGS_URL, timeout=embedding_timeout
+        )
+
+        daemon_online = tags is not None
+        installed_models = [m.get("name", "") for m in (tags or {}).get("models", [])]
+
+        embedding_model_ready = any(embed_model in m for m in installed_models)
+        generation_model_ready = any(gen_model in m for m in installed_models)
+
+        if mode == "Option A":
+            # Option A does not need the local generation model, but it still needs the
+            # embedding model for deep analysis. Report both facts separately so the UI can
+            # say "cloud is fine, deep analysis is not" (AC Scenario 3).
+            self.network_guard.validate_egress("llm_cloud", "https://api.anthropic.com")
+            status_ok = api_key_configured
+            if not api_key_configured:
+                error_code = "API_KEY_NOT_CONFIGURED"
+            elif not embedding_model_ready:
+                error_code = "LLM_PROVISION_REQUIRED"
+            else:
+                error_code = None
+        else:
+            status_ok = daemon_online and embedding_model_ready and generation_model_ready
+            if not daemon_online:
+                error_code = "LLM_UNAVAILABLE"
+            elif not (embedding_model_ready and generation_model_ready):
+                error_code = "LLM_PROVISION_REQUIRED"
+            else:
+                error_code = None
+
+        return {
+            "mode": mode,
+            "api_key_configured": api_key_configured,
+            "daemon_online": daemon_online,
+            "status_ok": status_ok,
+            "embedding_model_ready": embedding_model_ready,
+            "generation_model_ready": generation_model_ready,
+            "error_code": error_code
+        }

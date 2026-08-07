@@ -18,6 +18,7 @@ class ConfigManager:
         "llm_timeout_connect": "10",
         "llm_timeout_read": "120",
         "llm_timeout_embedding": "30",
+        "llm_health_timeout": "5",
         "local_embedding_model": "nomic-embed-text",
         "local_generation_model": "qwen2.5:7b-instruct",
         "api_key_encrypted": "",

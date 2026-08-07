@@ -134,12 +134,18 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
 
     @app.get("/api/v1/config/llm")
     def get_llm_config():
-        from src.backend.config_manager import ConfigManager
-        cm = ConfigManager(db_mgr)
+        # LLM-QRY-01: report the real probe result, never a hardcoded is_healthy (DEC-13).
+        from src.backend.services.query_services import LlmQueryService
+        health = LlmQueryService(db_mgr).check_health()
         return ApiResponse.success(LlmHealthCheckRes(
             status="ok",
-            mode=cm.get("llm_mode", "Option A"),
-            is_healthy=True
+            mode=health["mode"],
+            is_healthy=health["status_ok"],
+            api_key_configured=health["api_key_configured"],
+            daemon_online=health["daemon_online"],
+            embedding_model_ready=health["embedding_model_ready"],
+            generation_model_ready=health["generation_model_ready"],
+            error_code=health["error_code"],
         ))
 
     @app.post("/api/v1/config/llm")
