@@ -169,9 +169,9 @@ class RenameService:
         history_id = str(uuid.uuid4())
         with self.db_mgr.transaction() as conn:
             conn.execute(
-                """INSERT INTO Rename_History (history_id, workspace_id, old_paths, new_paths)
-                   VALUES (?, ?, ?, ?);""",
-                (history_id, workspace_id, json.dumps(old_paths_list), json.dumps(new_paths_list)),
+                """INSERT INTO Rename_History (history_id, workspace_id, old_paths, new_paths, status)
+                   VALUES (?, ?, ?, ?, ?);""",
+                (history_id, workspace_id, json.dumps(old_paths_list), json.dumps(new_paths_list), "pending"),
             )
         self._last_history_id = history_id
 
@@ -255,6 +255,17 @@ class RenameService:
                 })
 
         status = "applied" if not failed else "multi_status"
+
+        # Update the Rename_History row's status to reflect completion (issue #90 fix).
+        # DEC-05: SQL only inside Repository classes, but Rename_History has no dedicated repository
+        # yet, and this is a single-row write tied to the rename transaction, so it stays here.
+        if history_id:
+            with self.db_mgr.transaction() as conn:
+                conn.execute(
+                    "UPDATE Rename_History SET status = ? WHERE history_id = ?;",
+                    (status, history_id)
+                )
+
         return {
             "status": status,
             "applied_count": len(succeeded),

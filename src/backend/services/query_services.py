@@ -122,6 +122,8 @@ class RenameQueryService:
             return []
 
         import json
+        # old_paths/new_paths are JSON arrays of path strings: ["C:\\path\\a.txt", ...]
+        # (stored by RenameService.generate_rename_diff L165-166, not as object arrays).
         old_paths = json.loads(row["old_paths"]) if row["old_paths"] else []
         new_paths = json.loads(row["new_paths"]) if row["new_paths"] else []
 
@@ -129,11 +131,18 @@ class RenameQueryService:
         # strict=True: both lists come from the same Rename_History row and are written in
         # lockstep, so a length mismatch is corruption — truncating it silently would hand the
         # user a diff that is missing rows.
-        for op, np in zip(old_paths, new_paths, strict=True):
+        for old_p, new_p in zip(old_paths, new_paths, strict=True):
+            # Fetch file_id from File_Meta by current_path. Same pattern as
+            # RenameService.apply_rename_diff L206 — the stored history has paths only, so file_id
+            # must be re-resolved. A moved/deleted file since the diff was generated will have no
+            # matching row; we include it with file_id=None so the frontend can show "file missing".
+            c = conn.cursor()
+            c.execute("SELECT file_id FROM File_Meta WHERE current_path = ?;", (old_p,))
+            r = c.fetchone()
             diff_list.append({
-                "file_id": op.get("file_id"),
-                "old_name": os.path.basename(op.get("path", "")),
-                "new_name": np.get("new_name"),
+                "file_id": r["file_id"] if r else None,
+                "old_name": os.path.basename(old_p),
+                "new_name": os.path.basename(new_p),
                 "history_id": row["history_id"],
                 "status": row["status"]
             })
