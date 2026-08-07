@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS Watcher_Config (
     workspace_id TEXT PRIMARY KEY REFERENCES Workspace_Meta(workspace_id) ON DELETE CASCADE,
     is_enabled INTEGER NOT NULL DEFAULT 1,
     debounce_ms INTEGER NOT NULL DEFAULT 500,
+    mode TEXT NOT NULL DEFAULT 'realtime',
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 

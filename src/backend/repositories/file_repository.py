@@ -66,3 +66,10 @@ class FileRepository:
         """
         with self.db_mgr.transaction() as conn:
             conn.execute(query, (new_path, new_filename, workspace_id, file_id))
+
+    def get_by_path(self, workspace_id: str, path: str) -> Optional[Dict[str, Any]]:
+        conn = self.db_mgr.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM File_Meta WHERE workspace_id = ? AND current_path = ?;", (workspace_id, path))
+        row = cursor.fetchone()
+        return dict(row) if row else None
