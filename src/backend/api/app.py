@@ -264,4 +264,49 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             "queued_items_count": q_size
         })
 
+    # --- Analytics & Statistics Endpoints (STAT-CMD-01 & STAT-QRY-01) ---
+
+    @app.post("/api/v1/workspace/{workspace_id}/analytics/event")
+    def log_analytics_event_endpoint(workspace_id: str, payload: Dict[str, Any]):
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+        from src.backend.services.analytics_service import AnalyticsService
+        svc = AnalyticsService(db_mgr)
+        event_type = payload.get("event_type", "deeplink_click")
+        file_id = payload.get("file_id")
+        wiki_id = payload.get("wiki_id")
+        tokens_used = payload.get("tokens_used", 0)
+        cost_usd = payload.get("cost_usd")
+        
+        res = svc.log_event(
+            workspace_id,
+            event_type=event_type,
+            file_id=file_id,
+            wiki_id=wiki_id,
+            tokens_used=tokens_used,
+            cost_usd=cost_usd
+        )
+        return ApiResponse.success(res)
+
+    @app.get("/api/v1/workspace/{workspace_id}/analytics/summary")
+    def get_analytics_summary_endpoint(
+        workspace_id: str,
+        from_time: Optional[str] = None,
+        to_time: Optional[str] = None
+    ):
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+        from src.backend.services.analytics_service import AnalyticsService
+        svc = AnalyticsService(db_mgr)
+        summary = svc.get_analytics_summary(workspace_id, from_time=from_time, to_time=to_time)
+        return ApiResponse.success(summary)
+
     return app
