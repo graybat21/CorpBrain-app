@@ -105,7 +105,7 @@ flowchart TD
 
 ### 8. 아키텍처 개요 (High-Level Architecture)
 * **데스크톱 셸:** **pywebview** (OS 내장 WebView2 임베드, 단일 프로세스). Electron/Tauri 미사용 — 상세 근거는 SRS §3.2 `DEC-01`.
-* **프론트엔드 (UI):** React 기반 데스크톱 UI + 좌측 워크스페이스 패널 (정적 SPA 번들로 프리빌드되어 exe에 내장, Node 런타임 불요)
+* **프론트엔드 (UI):** React 기반 데스크톱 UI + 좌측 워크스페이스 패널 (Tailwind CSS + Shadcn UI 스택, 정적 SPA 번들로 프리빌드되어 exe에 내장, Node 런타임 불요)
 * **코어/백엔드:** Python (PyInstaller `--onefile` 패키징 단일 exe)
   * 파싱 모듈 (docx, pdfminer, txt, md)
   * 로컬 Vector DB (**ChromaDB** 확정 — 임베딩은 Ollama `nomic-embed-text` 768차원 로컬 계산. SRS §6.2 `DEC-06`)

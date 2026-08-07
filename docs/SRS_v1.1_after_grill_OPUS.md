@@ -144,7 +144,7 @@ Standard: ISO/IEC/IEEE 29148:2018
 | 셸(Shell) | **pywebview** (Windows 백엔드 = WebView2 / EdgeChromium) |
 | 프로세스 모델 | **단일 프로세스** — Python이 host, WebView는 임베드된 렌더러. Electron/Tauri 사이드카 구조를 **채택하지 않는다.** |
 | 패키징 | **PyInstaller** `--onefile` → `CorpBrain.exe` 1개 (React 정적 번들을 `--add-data`로 내장) |
-| 프론트엔드 빌드 | React SPA를 **정적 번들로 프리빌드**하여 exe에 내장. Next.js SSR·Node 런타임 의존 **금지** (해시 라우터 기반 클라이언트 라우팅만 사용) |
+| 프론트엔드 빌드 | React SPA를 **정적 번들로 프리빌드**하여 exe에 내장 (Vite 빌드, **Tailwind CSS + Shadcn UI**, **Zustand** 전역 상태 관리 적용). Next.js SSR·Node 런타임 의존 **금지** (해시 라우터 기반 클라이언트 라우팅만 사용) |
 | 런타임 전제 | WebView2 Runtime (Windows 11 및 최신 Windows 10 기본 탑재). 부재 시 **Evergreen Bootstrapper 안내 다이얼로그**를 표시하고 앱을 크래시 없이 종료 |
 | 근거 | CON-02(단일 `.exe` 로컬 구동형) 및 REQ-NF-004(`%LocalAppData%` 격리)를 문자 그대로 충족하며, Node·Rust 런타임을 도입하지 않아 Python 중심 스택을 유지 |
 
@@ -434,7 +434,7 @@ flowchart TB
 | **REQ-FUNC-012** | Fast Analysis | REF-01 §5 F3 | Must | 폴더 구조 맥락과 파일명만을 파싱하여 핵심 문서를 유추하고 중요도를 점수화하여 하이라이트한다. | **Given** 사용자가 '고속 분석'을 선택했을 때, **When** 파일명과 경로 메타데이터 추출이 완료되면, **Then** 각 파일의 중요도를 0~100 점수로 산정하여 상위 문서를 UI 상단에 하이라이트 표시한다. |
 | **REQ-FUNC-013** | Deep Analysis Wiki | REF-01 §5 F3 | Must | 문서 전체 텍스트를 파싱·청킹하여 벡터 DB에 저장하고, 1-Depth 폴더별로 분리된 구조적 위키를 마크다운으로 생성한다. | **Given** 사용자가 '심층 분석'을 선택했을 때, **When** 전체 파일 파싱 및 청킹이 완료되면, **Then** 벡터 DB에 임베딩을 저장하고 1-Depth 폴더 단위로 탭을 분리한 마크다운 위키를 생성하여 UI에 렌더링한다. |
 | **REQ-FUNC-014** | Folder-Tab Separation | REF-01 §5 F3 | Must | 심층 분석 위키는 1-Depth 폴더별 탭으로 분리하여 맥락 혼선(Hallucination)을 방지한다. | **Given** 위키 생성이 완료된 상태에서, **When** 위키를 렌더링하면, **Then** 워크스페이스 하위 1-Depth 폴더 각각이 독립 탭으로 분리되어 표시되고, 탭 간 내용이 혼합되지 않는다. |
-| **REQ-FUNC-015** | Analysis Progress Indicator | REF-01 §5 F3 | Should | 고속/심층 분석 진행 중 처리된 파일 수 / 전체 파일 수 비율을 프로그레스 바로 표시한다. | **Given** 분석이 시작된 상태에서, **When** 파일 처리가 진행되면, **Then** `처리 완료 N / 전체 M` 형태의 프로그레스 바와 잔여 예상 시간을 UI에 실시간으로 업데이트한다. |
+| **REQ-FUNC-015** | Analysis Progress Indicator | REF-01 §5 F3 | Should | 비동기 장기 작업(분석 등) 진행 상태 및 에러를 비차단형(Non-blocking) Toast 알림으로 하단 구석에 표시한다. | **Given** 분석이 시작된 상태에서, **When** 파일 처리가 진행되거나 에러가 발생하면, **Then** 하단 구석의 비동기 Toast 알림을 통해 `처리 완료 N / 전체 M` 프로그레스 및 잔여 예상 시간을 실시간 업데이트하고, 작업 완료 시 Toast를 클릭하여 결과로 이동할 수 있어야 한다 (작업 중 UI 차단 금지). |
 
 #### 4.1.4 F4: 일괄 폴더/파일명 개편
 
@@ -488,7 +488,7 @@ flowchart TB
 | **REQ-NF-011** | Availability | RPO / RTO | 앱 비정상 종료 시 **RPO(Recovery Point Objective) ≤ 마지막 DB 커밋 시점**, **RTO(Recovery Time Objective) ≤ 30초**(앱 재시작 후 정상 서비스까지). | TC-AVAIL-002: 분석 중 프로세스 강제 종료 후 재시작, 30초 이내 정상 서비스 복구 및 데이터 손실 범위 검증 |
 | **REQ-NF-012** | Scalability | File Count Headroom | 단일 워크스페이스 내 **10,000개 파일**까지 스캔·분석·위키 생성이 정상 동작해야 한다. | TC-SCALE-001: 10,000개 파일 워크스페이스에서 전체 파이프라인 동작 검증 |
 | **REQ-NF-013** | Scalability | Workspace Count | 동시에 **50개 이상**의 워크스페이스를 히스토리에 보존하고 전환할 수 있어야 한다. | TC-SCALE-002: 50개 워크스페이스 생성 후 전환·조회 응답 시간 < 2초 확인 |
-| **REQ-NF-014** | Maintainability | Log Rotation | 앱 로그 파일은 **최대 50MB** 또는 **30일** 기준으로 자동 로테이션되어야 한다. | TC-MAINT-001: 로그 파일 크기 50MB 초과 또는 30일 경과 시 로테이션 동작 확인 |
+| **REQ-NF-014** | Maintainability | Log Rotation | 앱 로그 파일은 **Plain Text 포맷**으로 작성되며, **일별 롤링 (최대 7일 보관)** 및 **일별 최대 10MB** 기준으로 자동 로테이션되어야 한다. 사용자가 메모장으로 열람하여 오류 제보가 용이해야 한다. | TC-MAINT-001: 로그 파일 크기 10MB 초과 또는 7일 경과 시 로테이션 동작 확인 및 포맷 검증 |
 | **REQ-NF-015** | Maintainability | Config Portability | 사용자 설정(LLM 모드, Watcher 옵션 등)은 JSON/TOML 파일로 내보내기·불러오기가 가능해야 한다. | TC-MAINT-002: 설정 Export → Import 후 모든 설정값 동일 확인 |
 | **REQ-NF-016** | Cost | Unit Processing Cost | Option A(클라우드) 사용 시 **파일 1개당 평균 API 호출 비용**을 산출하여 사용자에게 누적 비용 정보를 제공해야 한다. 비용은 응답의 실측 `usage` 토큰 × `App_Config` 단가로 계산한 **추정치**이며, UI에 **단가 기준일**을 병기한다 (`DEC-16`). | TC-COST-001: 100개 파일 분석 후 표시된 누적 비용과 실제 API 사용량 대조 검증 / 단가 기준일 표기 및 설정 화면 편집 동작 확인 |
 | **REQ-NF-017** | Monitoring | Internal Health Metrics | 앱 내부적으로 분석 성공/실패 횟수, 평균 분석 소요 시간, Watcher 이벤트 처리 건수를 **로컬 로그**에 기록해야 한다. | TC-MON-001: 로그 파일에서 정의된 메트릭 항목의 존재 및 정확성 확인 |
@@ -935,7 +935,7 @@ Rename(F4)과 딥링크(F5)는 동일한 경로 문자열을 공유하므로, �
 |:---|:---|
 | 앵커 형식 | 위키 마크다운 내 유일한 딥링크 앵커는 **`[[file_id:<UUID>]]`** 이다. 절대 경로·파일명·상대 경로를 앵커로 쓰지 않는다. |
 | 경로 저장 위치 | 경로는 **`File_Meta` 단일 지점**에만 존재한다. `Wiki_Content.markdown_content` / `deeplink_mappings` / 벡터 메타데이터에는 경로를 저장하지 않는다. |
-| Late binding | 딥링크 해석은 **조회 시점**에 `file_id → File_Meta.current_path` 조회로 수행한다. 위키 재생성 없이 경로 변경이 즉시 반영된다. |
+| Late binding | 딥링크 해석은 **조회 시점**에 `file_id → File_Meta.current_path` 조회로 수행한다. 프론트엔드에서는 `react-markdown`과 커스텀 remark/rehype 플러그인을 사용하여 `[[file_id:UUID]]`를 onClick 이벤트가 바인딩된 앵커 태그로 렌더링한다. 위키 재생성 없이 경로 변경이 즉시 반영된다. |
 | 경로 컬럼 분리 | `current_path`(현재 위치, 가변) / `original_path`(최초 스캔 시점, 불변). 파일 열기·존재 검증은 **항상 `current_path`** 를 쓴다. |
 | Rename 반영 | `os.rename()` 성공 직후 해당 `File_Meta` 행의 `current_path`·`file_name` **한 행만 UPDATE**. 위키 본문은 건드리지 않는다. |
 | Undo 반영 | `Rename_History.old_paths`/`new_paths`는 **OS 레벨 롤백용으로 경로 기반을 유지**한다(디스크 상태 복원에는 실제 경로가 필요). Undo는 `current_path`를 `old_paths` 값으로 되돌린다. |

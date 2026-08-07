@@ -119,7 +119,7 @@ This file contains binding operating procedures and coding conventions for AI co
   - A violation raises `EgressBlockedError` and **no request is issued**. Log the blocked host and `purpose` only — never the request body.
   - **Do not import `httpx`, `requests`, `socket`, or `urllib.request` in any module other than `NetworkGuard`** — a CI lint rule enforces this and failing it blocks the merge. Route the call through `NetworkGuard` instead.
   - `purpose='provisioning'` requests carry **no document data** — not in the body, query string, or User-Agent.
-  - **Never add a remote telemetry or crash-reporting SDK** (GA, Sentry, PostHog, …). Crash details go to the local rolling log only.
+  - **Never add a remote telemetry or crash-reporting SDK** (GA, Sentry, PostHog, …). Crash details go to the local rolling log only (Plain text, max 7 days, 10MB/day).
   - **Adding a fourth destination is a design-decision change, not a code change**: the `DEC-15` whitelist table and `REQ-NF-005` must be updated in the same change, otherwise reject it.
   - Do not monkey-patch `socket.socket` at runtime to enforce this — it intercepts ChromaDB/`anthropic` SDK internals and breaks unpredictably under PyInstaller. The import lint achieves the same goal statically.
 - **React Frontend**: Follow modern ESNext conventions for UI components. Frontend communicates with Python Core exclusively via IPC (REST API / JSON).
@@ -162,7 +162,7 @@ A task is considered **DONE** only when ALL of the following criteria are verifi
 - **Test Framework**: `pytest` (default) — run with `pytest tests/` from project root
 - **Linter**: `ruff` or `flake8` — zero lint errors required before PR
 - **Database**: SQLite (`corpbrain_meta.db`) at `%LocalAppData%\CorpBrain\` — stdlib `sqlite3`, `PRAGMA user_version` migrations in `migrations/` (see §4 `DEC-05`)
-- **Frontend**: React SPA built by Vite with `base: './'` (relative assets, HashRouter) → static bundle embedded in the exe; communicates via REST IPC
+- **Frontend**: React SPA (Tailwind CSS + Shadcn UI, Zustand) built by Vite with `base: './'` (relative assets, HashRouter) → static bundle embedded in the exe; communicates via REST IPC. Markdown rendering uses `react-markdown` with custom remark/rehype plugins for `[[file_id:UUID]]` deep links. Polling tasks and errors use non-blocking Toast notifications, not full-screen modals.
 - **Desktop Shell**: `pywebview` (WebView2 backend) — see §1 `DEC-01`
 - **Packaging**: PyInstaller `--onefile` → single `CorpBrain.exe` for Windows 10/11
 - **Key Directories**:

@@ -1,0 +1,92 @@
+import React from 'react';
+import {
+  LayoutDashboard,
+  FolderTree,
+  BookOpen,
+  FileDiff,
+  ShieldAlert,
+  FolderPlus,
+  ChevronRight,
+  HardDrive
+} from 'lucide-react';
+import { useAppStore } from '../store/appStore';
+
+export const Sidebar: React.FC = () => {
+  const { activeTab, setActiveTab, currentWorkspace, workspaces, addToast } = useAppStore();
+
+  const navItems = [
+    { id: 'dashboard', label: '대시보드 (Analytics)', icon: LayoutDashboard },
+    { id: 'files', label: '파일 탐색 & 중요도', icon: FolderTree },
+    { id: 'wiki', label: '딥링크 위키 (Late Binding)', icon: BookOpen },
+    { id: 'rename', label: '파일명 일괄 추천 (Diff)', icon: FileDiff },
+    { id: 'settings', label: '보안 & LLM 설정', icon: ShieldAlert },
+  ] as const;
+
+  return (
+    <aside className="w-64 bg-slate-900/95 border-r border-slate-800 flex flex-col justify-between select-none">
+      <div>
+        {/* Workspace Selector */}
+        <div className="p-3.5 border-b border-slate-800">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5 flex items-center justify-between">
+            <span>현재 워크스페이스</span>
+            <button
+              onClick={() => addToast('info', '새 워크스페이스 추가 다이얼로그를 엽니다.')}
+              className="hover:text-indigo-400 p-0.5 transition"
+              title="워크스페이스 추가"
+            >
+              <FolderPlus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="bg-slate-800/90 border border-slate-700/70 rounded-lg p-2.5 flex items-center justify-between cursor-pointer hover:border-indigo-500/50 transition">
+            <div className="flex items-center space-x-2 overflow-hidden">
+              <HardDrive className="w-4 h-4 text-indigo-400 shrink-0" />
+              <div className="truncate">
+                <p className="text-xs font-medium text-slate-200 truncate">
+                  {currentWorkspace?.workspace_name || '선택된 워크스페이스 없음'}
+                </p>
+                <p className="text-[10px] text-slate-400 font-mono truncate">
+                  {currentWorkspace?.root_path}
+                </p>
+              </div>
+            </div>
+            <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+          </div>
+        </div>
+
+        {/* Navigation Menu */}
+        <nav className="p-2 space-y-1">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-medium transition ${
+                  isActive
+                    ? 'bg-indigo-600/90 text-white shadow-lg shadow-indigo-600/20'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                }`}
+              >
+                <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* System Status Footer */}
+      <div className="p-3 border-t border-slate-800 bg-slate-950/40 text-[11px] text-slate-400 space-y-1">
+        <div className="flex justify-between items-center">
+          <span>PIIFilter 게이트:</span>
+          <span className="text-emerald-400 font-mono">Fail-Closed ON</span>
+        </div>
+        <div className="flex justify-between items-center">
+          <span>로컬 로그 보관:</span>
+          <span className="text-slate-300 font-mono">Max 7일 / 10MB</span>
+        </div>
+      </div>
+    </aside>
+  );
+};
