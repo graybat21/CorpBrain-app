@@ -217,3 +217,46 @@ class LlmQueryService:
             "generation_model_ready": generation_model_ready,
             "error_code": error_code
         }
+
+
+class WikiQueryService:
+    """
+    ANA-QRY-01: 1-Depth 폴더별로 분리 가공된 위키 마크다운 구조 반환.
+
+    Wiki_Content는 workspace_id + folder_1depth UNIQUE 제약을 갖고, 각 행이 하나의 폴더 탭에
+    대응한다. 이 서비스는 해당 워크스페이스의 전체 위키를 조회해 폴더명 → 마크다운 맵으로 반환한다.
+    """
+
+    def __init__(self, db_mgr: DatabaseManager):
+        self.db_mgr = db_mgr
+
+    def get_workspace_wiki(self, workspace_id: str) -> List[Dict[str, Any]]:
+        """
+        Return all wiki tabs for a workspace as [{folder_1depth, markdown_content, wiki_id}, ...].
+
+        Issue #7 AC S1: returns an array (not a dict) so the frontend can control tab order.
+        Each item has folder_1depth (the tab label), markdown_content (the rendered text), and
+        wiki_id (for potential future updates/deletion).
+
+        DEC-08: markdown_content contains [[file_id:<UUID>]] anchors, never absolute paths.
+        """
+        conn = self.db_mgr.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT wiki_id, folder_1depth, markdown_content, created_at, updated_at
+               FROM Wiki_Content
+               WHERE workspace_id = ?
+               ORDER BY folder_1depth ASC;""",
+            (workspace_id,)
+        )
+        rows = cursor.fetchall()
+        return [
+            {
+                "wiki_id": r["wiki_id"],
+                "folder_1depth": r["folder_1depth"],
+                "markdown_content": r["markdown_content"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            }
+            for r in rows
+        ]

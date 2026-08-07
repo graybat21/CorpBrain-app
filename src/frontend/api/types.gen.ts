@@ -177,6 +177,12 @@ export interface ApiResponse_WorkspaceListRes_ {
   error?: ApiError | null;
 }
 
+export interface ApiResponse_WorkspaceWikiRes_ {
+  ok: boolean;
+  data?: WorkspaceWikiRes | null;
+  error?: ApiError | null;
+}
+
 /**
  * DEC-08: `file_id` only. A caller-supplied path is never accepted.
  */
@@ -417,6 +423,17 @@ export interface WatcherStatusRes {
   queued_items_count: number;
 }
 
+/**
+ * A single wiki tab (one folder_1depth) returned by ANA-QRY-01.
+ */
+export interface WikiTabRes {
+  wiki_id: string;
+  folder_1depth: string;
+  markdown_content: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface WorkspaceCreateReq {
   /**
    * Workspace name
@@ -444,6 +461,14 @@ export interface WorkspaceItemRes {
 export interface WorkspaceListRes {
   items: WorkspaceItemRes[];
   total: number;
+}
+
+/**
+ * All wiki tabs for a workspace, ordered by folder_1depth (issue #7).
+ */
+export interface WorkspaceWikiRes {
+  workspace_id: string;
+  tabs: WikiTabRes[];
 }
 
 /**
@@ -478,5 +503,6 @@ export const API_PATHS = {
   GET_workspace_watcher_config: "/api/v1/workspace/{workspace_id}/watcher/config",
   POST_workspace_watcher_config: "/api/v1/workspace/{workspace_id}/watcher/config",
   GET_workspace_watcher_status: "/api/v1/workspace/{workspace_id}/watcher/status",
+  GET_workspace_wiki: "/api/v1/workspace/{workspace_id}/wiki",
   GET_workspaces: "/api/v1/workspaces",
 } as const;
