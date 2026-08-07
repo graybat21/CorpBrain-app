@@ -2,6 +2,9 @@
 import sys
 import subprocess
 
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+
 REPO = "graybat21/CorpBrain-app"
 
 # Mapping from Task Code to GitHub Issue Number
@@ -49,27 +52,54 @@ def resolve_issue_number(target: str) -> int:
 def start_task(target: str):
     issue_num = resolve_issue_number(target)
     print(f"🔄 [Task Tracker] Transitioning Task {target} (Issue #{issue_num}) -> IN PROGRESS")
-    cmd = [
+    
+    # 1) Add 'in-progress' label to Issue
+    cmd_label = [
+        "gh", "issue", "edit", str(issue_num),
+        "--repo", REPO,
+        "--add-label", "in-progress"
+    ]
+    try:
+        subprocess.run(cmd_label, check=True)
+        print(f"  ✅ Added 'in-progress' label to Issue #{issue_num}")
+    except subprocess.CalledProcessError as e:
+        print(f"  ⚠️ Failed to add label to Issue #{issue_num}: {e}")
+
+    # 2) Post start comment
+    cmd_comment = [
         "gh", "issue", "comment", str(issue_num),
         "--repo", REPO,
         "--body", f"🚀 AI 에이전트(다온)가 태스크 `{target}` 구현 및 검증 작업을 시작합니다. [Status -> In Progress]"
     ]
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd_comment, check=True)
         print(f"  ✅ Commented on Issue #{issue_num}")
     except subprocess.CalledProcessError as e:
-        print(f"  ⚠️ Failed to update Issue #{issue_num}: {e}")
+        print(f"  ⚠️ Failed to comment on Issue #{issue_num}: {e}")
 
 def complete_task(target: str):
     issue_num = resolve_issue_number(target)
     print(f"✅ [Task Tracker] Transitioning Task {target} (Issue #{issue_num}) -> DONE (Closed)")
-    cmd = [
+    
+    # Remove 'in-progress' label if present
+    cmd_rm_label = [
+        "gh", "issue", "edit", str(issue_num),
+        "--repo", REPO,
+        "--remove-label", "in-progress"
+    ]
+    try:
+        subprocess.run(cmd_rm_label, check=False)
+    except Exception:
+        pass
+
+    # Close Issue
+    cmd_close = [
         "gh", "issue", "close", str(issue_num),
         "--repo", REPO,
         "--comment", f"✨ 태스크 `{target}` 구현 및 100% 자동화 단위 테스트 검증이 완료되었습니다. [Status -> Done]"
     ]
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd_close, check=True)
         print(f"  ✅ Closed Issue #{issue_num}")
     except subprocess.CalledProcessError as e:
         print(f"  ⚠️ Failed to close Issue #{issue_num}: {e}")
