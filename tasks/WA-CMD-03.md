@@ -12,9 +12,10 @@ assignees: ''
 
 ## :link: References (Spec & Context)
 - SRS 문서: `REQ-FUNC-025`
+- **확정 사항: `DEC-09`** — `delete_file(file_id)` → `upsert` 순서 고정, Chroma 호출은 SQLite 트랜잭션 외부
 
 ## :white_check_mark: Task Breakdown (실행 계획)
-- [ ] 대상 파일의 기존 벡터(ChromaDB) 삭제 및 새 청크/임베딩 Insert (ANA-CMD-02 로직 재사용)
+- [ ] 대상 파일의 기존 벡터를 **`VectorDBManager.delete_file(file_id)`(메타데이터 필터 삭제)** 로 제거한 뒤 새 청크/임베딩 upsert (ANA-CMD-02 로직 재사용). chunk ID 목록을 DB에서 조회하지 않는다 (`DEC-09`)
 - [ ] 해당 파일이 속한 1-Depth 폴더 단위의 `Wiki_Content` 재생성 트리거 (ANA-CMD-03 로직 재사용)
 - [ ] 재생성 성공 후 DB 갱신 및 프론트엔드로 알림 브로드캐스트
 

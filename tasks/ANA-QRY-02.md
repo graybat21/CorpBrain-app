@@ -12,7 +12,7 @@ assignees: ''
 
 ## :link: References (Spec & Context)
 > :bulb: AI Agent & Dev Note: 작업 시작 전 아래 문서를 반드시 먼저 Read/Evaluate 할 것.
-- SRS 문서: `04_SRS-Drafts/피벗 버전/SRS-draft_v0.6_OPUS.md` §4.1.3 → **REQ-FUNC-015** (Analysis Progress Indicator)
+- SRS 문서: `docs/SRS_v1.1_after_grill_OPUS.md` §4.1.3 → **REQ-FUNC-015** (Analysis Progress Indicator)
 - API 명세: API-002
 
 ## :white_check_mark: Task Breakdown (실행 계획)

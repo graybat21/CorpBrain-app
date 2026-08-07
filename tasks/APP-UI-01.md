@@ -13,12 +13,14 @@ assignees: ''
 ## :link: References (Spec & Context)
 > :bulb: AI Agent & Dev Note: 작업 시작 전 아래 문서를 반드시 먼저 Read/Evaluate 할 것.
 - SRS 문서: `§3.6 (UX/UI 디자인 방향성)`
+- **셸 확정 사항: SRS `§3.2 DEC-01`** — pywebview + WebView2 단일 프로세스, PyInstaller `--onefile`
 
 ## :white_check_mark: Task Breakdown (실행 계획)
-- [ ] React/Next.js 라우터(Router) 초기화 및 `/, /dashboard, /workspace/:id` 등 경로 정의
+- [ ] **React SPA** 라우터 초기화 — `file://` 로딩 환경이므로 **HashRouter**(`#/dashboard`, `#/workspace/:id`) 사용. **Next.js·SSR·Node 런타임 도입 금지** (DEC-01)
+- [ ] 정적 번들 빌드 파이프라인 구성 (Vite 등) — 산출물이 PyInstaller `--add-data`로 내장 가능한 상대 경로 자산이어야 함 (`base: './'`)
 - [ ] 글로벌 CSS(혹은 Tailwind/CSS-in-JS) 토큰 및 컬러 팔레트 세팅
 - [ ] 레이아웃 컴포넌트(Sidebar, Top Nav, Main Section) 구조화
-- [ ] 일렉트론(Electron) 또는 데스크탑 WebView 특성을 고려한 `-webkit-app-region: drag` 타이틀바 적용
+- [ ] pywebview 프레임리스 창 기준 커스텀 타이틀바 적용 (`pywebview-drag-region` 클래스 / `-webkit-app-region: drag`)
 
 ## :test_tube: Acceptance Criteria (BDD/GWT)
 Scenario 1: 기본 레이아웃 렌더링
