@@ -32,7 +32,8 @@ def test_scenario_2_single_file_isolation_in_batch():
 
     batch_res = service.process_file_batch(files, process_func)
 
-    assert batch_res["status"] == "multi_status"
+    # Issue #89: partial failure returns status='completed' (the batch finished).
+    assert batch_res["status"] == "completed"
     assert batch_res["succeeded_count"] == 9
     assert len(batch_res["failed"]) == 1
     assert batch_res["failed"][0]["file_id"] == "file_03"

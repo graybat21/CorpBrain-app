@@ -469,8 +469,10 @@ def test_result_endpoint_maps_multi_status_to_207(api):
     """A partially failed batch must not read as a plain success (DEC-03)."""
     client, headers, _, app = api
     task = app.state.task_repo.create("rename_apply")
+    # Issue #89: status is 'completed' (task finished), but failed[] is non-empty.
+    # API layer now checks failed[] to decide HTTP 207.
     app.state.task_repo.finish(
-        task["task_id"], "multi_status", result={"failed": [{"file_id": "x", "error_code": "OSError"}]}
+        task["task_id"], "completed", result={"failed": [{"file_id": "x", "error_code": "OSError"}]}
     )
 
     res = client.get(f"/api/v1/task/{task['task_id']}/result", headers=headers)
@@ -571,7 +573,8 @@ def test_rename_apply_partial_failure_surfaces_as_207(api):
     task_id = res.json()["data"]["task_id"]
 
     done = poll_until_done(client, headers, task_id)
-    assert done["status"] == "multi_status"
+    # Issue #89: task status is 'completed', HTTP 207 comes from failed[] check.
+    assert done["status"] == "completed"
 
     outcome = client.get(f"/api/v1/task/{task_id}/result", headers=headers)
     assert outcome.status_code == 207
@@ -612,7 +615,8 @@ def test_v002_upgrades_an_existing_v001_database_without_data_loss():
         upgraded = DatabaseManager(db_path=db_path, migrations_dir=MIGRATIONS_DIR)
         try:
             conn = upgraded.get_connection()
-            assert conn.execute("PRAGMA user_version;").fetchone()[0] == 2
+            # v003 adds Rename_History.status (issue #90), so the upgraded DB is now at version 3.
+            assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
             assert "result_json" in [r[1] for r in conn.execute("PRAGMA table_info(Async_Task);")]
             row = TaskRepository(upgraded).get("legacy-task")
             assert row["processed_count"] == 9

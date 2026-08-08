@@ -35,10 +35,12 @@ from src.backend.api.dtos import (
     WatcherConfigReq,
     WatcherConfigRes,
     WatcherStatusRes,
+    WikiTabRes,
     WorkspaceCreateReq,
     WorkspaceDeletedRes,
     WorkspaceItemRes,
     WorkspaceListRes,
+    WorkspaceWikiRes,
 )
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
@@ -229,11 +231,29 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         response = await call_next(request)
         return response
 
+    # Exception handlers: map known exceptions to DEC-03 error codes
+    @app.exception_handler(Exception)
+    async def generic_exception_handler(request: Request, exc: Exception):
+        from src.backend.services.vector_service import EmbeddingModelChangedError
+
+        if isinstance(exc, EmbeddingModelChangedError):
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content=ApiResponse[None].fail("EMBEDDING_MODEL_CHANGED", str(exc)).model_dump(),
+            )
+        # Other unhandled exceptions fall to INTERNAL_ERROR
+        import logging
+        logger = logging.getLogger("CorpBrain.API")
+        logger.exception(f"Unhandled exception: {type(exc).__name__}: {exc}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse[None].fail("INTERNAL_ERROR", "An internal error occurred").model_dump(),
+        )
+
     # Every route carries an explicit response_model. DEC-02 makes the generated OpenAPI schema
     # the contract SSOT, and a route without one contributes an empty `{}` response schema —
     # there is then nothing for the frontend types to be generated from. tests/test_ws_fe_01.py
     # asserts this holds for every /api/v1 route so a new one cannot skip it.
-
     @app.get("/api/v1/health", response_model=ApiResponse[HealthRes])
     def health():
         return ApiResponse.success(HealthRes(status="ok", app="CorpBrain"))
@@ -435,8 +455,13 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         A finished task's outcome, fetched once after polling reports a terminal status.
 
         Separate from the progress route because that one is polled every second and DEC-04
-        forbids putting payloads there. HTTP 207 when the task ended `multi_status`, so a
-        partially failed batch never reads as a plain success (DEC-03/DEC-16).
+        forbids putting payloads there. HTTP 207 when any files failed, so a partially failed
+        batch never reads as a plain success (DEC-03/DEC-16).
+
+        Issue #89: the 207 decision now comes from the presence of `failed[]` in result_json,
+        not from a string label. Services may use different internal status labels
+        ('completed', 'applied', 'reverted') and that's fine — what matters for the HTTP
+        status is whether any file failed.
         """
         result = app.state.task_query_service.get_result(task_id)
         if result is None:
@@ -445,7 +470,10 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
                 content=ApiResponse[None].fail("NOT_FOUND", f"Task {task_id} not found").model_dump(),
             )
         res = ApiResponse.success(TaskResultRes(**result))
-        if result["status"] == "multi_status":
+        # HTTP 207 if any files failed, regardless of the internal status label (issue #89).
+        # result["result"] is the parsed result_json from TaskRepository.get_result().
+        result_payload = result.get("result") or {}
+        if isinstance(result_payload, dict) and result_payload.get("failed"):
             return JSONResponse(status_code=status.HTTP_207_MULTI_STATUS, content=res.model_dump())
         return res
 
@@ -516,17 +544,16 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         """
         Map a RenameService result onto a task outcome.
 
-        RenameService reports 'applied'/'reverted'/'no_history' on success and 'multi_status'
-        on partial failure. Only the last of those is a terminal Async_Task status, so the
-        successful labels collapse to 'completed' while the service's own status is preserved
-        inside `result` — the frontend still sees which operation it was.
+        RenameService reports 'applied'/'reverted'/'no_history'/'multi_status'. Issue #89:
+        all of these map to Async_Task.status='completed' (the task finished), and the
+        service's own status is preserved inside `result` so the frontend can distinguish them.
 
-        `failed[]` is carried through untouched. It is the reason result_json exists: DEC-16
-        requires the per-file failures to reach the user, and a 202 response cannot carry them.
+        HTTP 207 is decided by the presence of `failed[]` in get_task_result_endpoint, not by
+        this status label. `failed[]` is carried through untouched — DEC-16 requires per-file
+        failures to reach the user, and a 202 response cannot carry them.
         """
-        service_status = res.get("status")
         return {
-            "status": "multi_status" if service_status == "multi_status" else "completed",
+            "status": "completed",
             "result": res,
         }
 
@@ -583,6 +610,31 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
 
         return _submit_once("rename_undo", workspace_id, body)
 
+    # --- Wiki Generation Endpoint (ANA-CMD-03) ---
+
+    @app.post("/api/v1/workspace/{workspace_id}/wiki/generate", status_code=status.HTTP_202_ACCEPTED)
+    def generate_wiki_endpoint(workspace_id: str):
+        """
+        Generate wiki markdown documents for all folders in a workspace (ANA-CMD-03).
+
+        DEC-04: Returns 202 + task_id. Frontend polls for progress.
+        """
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+
+        def body(ctx):
+            from src.backend.services.wiki_service import WikiGenerationService
+            svc = WikiGenerationService(db_mgr)
+            result = svc.generate_wiki_for_workspace(workspace_id)
+            ctx.set_total(result["succeeded_count"] + len(result["failed"]))
+            ctx.advance(result["succeeded_count"] + len(result["failed"]))
+            return result
+
+        return _submit_once("wiki_generate", workspace_id, body)
     def _watcher_config_res(cfg: Dict[str, Any]) -> WatcherConfigRes:
         # is_enabled is stored as SQLite INTEGER 0/1; the DTO exposes a real bool so the
         # frontend does not end up with a truthiness check on a number (DEC-03).
@@ -783,5 +835,72 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         svc = WorkspaceQueryService(db_mgr)
         items = [WorkspaceItemRes(**ws) for ws in svc.list_workspaces()]
         return ApiResponse.success(WorkspaceListRes(items=items, total=len(items)))
+
+    # --- Embedding Model Change Consent & Re-embedding (DEC-06 AC S3) ---
+
+    @app.post("/api/v1/workspace/{workspace_id}/reembed")
+    def reembed_workspace_endpoint(workspace_id: str, consent_model: str, consent_dim: int):
+        """
+        User consent to drop the workspace's vector collection and re-analyze all files with
+        the current embedding model. DEC-04: returns 202 + task_id, client polls for progress.
+
+        Args:
+            workspace_id: target workspace
+            consent_model: user-confirmed target model name (must match App_Config)
+            consent_dim: user-confirmed target dimension (must match App_Config)
+
+        Returns:
+            202 + task_id if consent token is valid and task is submitted
+            409 EMBEDDING_MODEL_CHANGED if token is stale/mismatched
+            404 NOT_FOUND if workspace does not exist
+        """
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+
+        consent_token = f"granted:{consent_model}:{consent_dim}"
+
+        def reembed_body(ctx):
+            from src.backend.config_manager import ConfigManager
+            from src.backend.services.vector_service import DeepAnalysisService, VectorDBManager
+
+            # Reset collection (consent is checked inside this call)
+            v_db = VectorDBManager(workspace_id=workspace_id, persist_dir=db_mgr.vectors_dir, config_mgr=ConfigManager(db_mgr))
+            v_db.reset_workspace_for_reembedding(consent_token)
+            v_db.close()
+
+            # Reset all File_Meta rows to pending (DEC-16: no separate retry queue)
+            conn = db_mgr.get_connection()
+            conn.execute("UPDATE File_Meta SET parse_status = 'pending' WHERE workspace_id = ?;", (workspace_id,))
+            conn.commit()
+
+            # Run full deep analysis
+            service = DeepAnalysisService(db_mgr)
+            batch_result = service.run_deep_analysis_batch(workspace_id)
+            return {"batch_result": batch_result}
+
+        task = app.state.task_runner.submit("reembed", reembed_body, workspace_id=workspace_id, total_count=0)
+        return _accepted(task)
+
+    # --- Wiki Query Endpoint (ANA-QRY-01) ---
+
+    @app.get("/api/v1/workspace/{workspace_id}/wiki", response_model=ApiResponse[WorkspaceWikiRes])
+    def get_workspace_wiki_endpoint(workspace_id: str):
+        """
+        Return all wiki tabs for a workspace (issue #7 / ANA-QRY-01).
+
+        Each tab corresponds to one folder_1depth row in Wiki_Content. The frontend renders
+        these as separate tabs in the wiki viewer (ANA-FE-02). Markdown content includes
+        [[file_id:<UUID>]] anchors (DEC-08), which the frontend replaces with clickable badges.
+
+        Depends on: ANA-CMD-03 (wiki generation) must have run first, otherwise tabs=[].
+        """
+        from src.backend.services.query_services import WikiQueryService
+        svc = WikiQueryService(db_mgr)
+        tabs = [WikiTabRes(**t) for t in svc.get_workspace_wiki(workspace_id)]
+        return ApiResponse.success(WorkspaceWikiRes(workspace_id=workspace_id, tabs=tabs))
 
     return app

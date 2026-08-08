@@ -354,3 +354,18 @@ class DeepLinkStatusRes(BaseModel):
     reason: Optional[str] = None
     file_name: Optional[str] = None
     current_path: Optional[str] = None
+
+
+class WikiTabRes(BaseModel):
+    """A single wiki tab (one folder_1depth) returned by ANA-QRY-01."""
+    wiki_id: str
+    folder_1depth: str
+    markdown_content: str
+    created_at: str
+    updated_at: str
+
+
+class WorkspaceWikiRes(BaseModel):
+    """All wiki tabs for a workspace, ordered by folder_1depth (issue #7)."""
+    workspace_id: str
+    tabs: List[WikiTabRes]

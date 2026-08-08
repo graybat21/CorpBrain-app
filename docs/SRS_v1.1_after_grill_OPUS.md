@@ -640,6 +640,7 @@ CON-03·REQ-NF-005는 "원천 배제"를 요구하지만 초안의 강제 수단
 | `LLM_UNAVAILABLE` | 503 | Ollama 데몬 무응답 또는 Cloud API 도달 불가 (REQ-NF-010) |
 | `LLM_PROVISION_REQUIRED` | 503 | 폐쇄망(`detect_only`)에서 Ollama 또는 필요 모델이 미준비 — **수동 프로비저닝 필요** (`DEC-13`) |
 | `PII_MASKING_FAILED` | 500 | PII 마스킹 무결성 검증 실패 → 전송 차단 Fail-Safe (REQ-FUNC-009) |
+| `EMBEDDING_MODEL_CHANGED` | 409 | 컬렉션이 다른 임베딩 모델/차원으로 생성됨 → 사용자 동의 후 재임베딩 필요 (DEC-06 AC S3) |
 | `ALREADY_UNDONE` | 409 | 이미 Undo된 `history_id`에 재차 Undo 요청 |
 | `INTERNAL_ERROR` | 500 | 그 외 처리되지 않은 예외 (스택트레이스는 **로컬 로그에만** 기록, 응답에 포함 금지) |
 
