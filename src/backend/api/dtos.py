@@ -8,6 +8,11 @@ T = TypeVar("T")
 class ApiError(BaseModel):
     code: str
     message: str
+    # DEC-03 lists `field?` and `details?` as part of the error object. `field` names the
+    # offending request field on a validation failure; `details` carries per-field messages.
+    # Neither ever holds a stack trace or an absolute internal path — those go to the local log.
+    field: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
 
 
 class ApiResponse(BaseModel, Generic[T]):
@@ -20,8 +25,23 @@ class ApiResponse(BaseModel, Generic[T]):
         return cls(ok=True, data=data, error=None)
 
     @classmethod
-    def fail(cls, code: str, message: str) -> "ApiResponse[T]":
-        return cls(ok=False, data=None, error=ApiError(code=code, message=message))
+    def fail(
+        cls,
+        code: str,
+        message: str,
+        field: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> "ApiResponse[T]":
+        return cls(
+            ok=False,
+            data=None,
+            error=ApiError(code=code, message=message, field=field, details=details),
+        )
+
+
+class HealthRes(BaseModel):
+    status: str
+    app: str
 
 
 class WorkspaceCreateReq(BaseModel):
@@ -49,6 +69,38 @@ class WorkspaceItemRes(BaseModel):
 
 class WorkspaceListRes(BaseModel):
     items: List[WorkspaceItemRes]
+    total: int
+
+
+class WorkspaceDeletedRes(BaseModel):
+    deleted: bool
+    workspace_id: str
+
+
+class FileItemRes(BaseModel):
+    """
+    One File_Meta row as the UI consumes it.
+
+    `original_path` is deliberately absent. DEC-08 makes it immutable audit data and requires
+    every open/existence check to go through `current_path`; not shipping it to the frontend
+    removes the possibility of a component picking the stale one.
+    """
+    file_id: str
+    workspace_id: str
+    file_name: str
+    extension: str
+    current_path: str
+    size_bytes: int
+    last_modified: float
+    parse_status: str
+    importance_score: int
+    created_at: str
+    updated_at: str
+
+
+class FileListRes(BaseModel):
+    workspace_id: str
+    items: List[FileItemRes]
     total: int
 
 
@@ -114,15 +166,12 @@ class InterruptedTaskListRes(BaseModel):
     total: int
 
 
-class ScanProgressRes(BaseModel):
+class ScanSummaryRes(BaseModel):
+    """SCAN-QRY-01. `estimated_analysis_seconds` is an estimate from measured throughput."""
     workspace_id: str
-    scanned_count: int
-    limit_reached: bool
-
-
-class FastAnalysisRes(BaseModel):
-    workspace_id: str
-    items: List[Dict[str, Any]]
+    file_count: int
+    total_size_mb: float
+    estimated_analysis_seconds: float
 
 
 class WikiMarkdownRes(BaseModel):
@@ -159,31 +208,149 @@ class LlmHealthCheckRes(BaseModel):
     error_code: Optional[str] = None
 
 
+class LlmConfigUpdatedRes(BaseModel):
+    """
+    DEC-12: only the mode is echoed back. The API key — even partially masked — is never in a
+    response body; `GET /api/v1/config/llm` reports `api_key_configured: bool` instead.
+    """
+    updated: bool
+    llm_mode: str
+
+
+class RenameDiffItemRes(BaseModel):
+    """
+    One row of the rename diff.
+
+    Names only, never paths: DEC-17 keeps absolute paths out of anything that reaches the LLM,
+    and DEC-08 keeps them out of anything cached client-side. `status` is one of
+    `pending` / `PII_TOKEN_LEFT` / `PII_MASKING_FAILED` / `INVALID_FILENAME`; anything other
+    than `pending` means the file is excluded from the batch and needs manual review.
+    """
+    file_id: str
+    old_name: str
+    new_name: str
+    status: str
+    note: str
+
+
 class RenameDiffRes(BaseModel):
     workspace_id: str
-    items: List[Dict[str, Any]]
+    items: List[RenameDiffItemRes]
+    # The Rename_History row this diff was persisted as. The client applies the diff by
+    # returning this id: DEC-08 keeps absolute paths off the client, so it cannot build the
+    # path pairs `apply_rename` needs. None when no file produced a `pending` suggestion.
+    history_id: Optional[str] = None
+
+
+class PendingRenameDiffItemRes(BaseModel):
+    """
+    RN-QRY-01: a persisted `pending` diff row, as opposed to a freshly generated one.
+
+    Known broken — `RenameQueryService.get_pending_rename_diff` queries a `Rename_History.status`
+    column that does not exist (issue #90). Typed here anyway so the contract the fix must
+    satisfy is in the OpenAPI schema rather than only in that issue's body.
+    """
+    file_id: Optional[str] = None
+    old_name: str
+    new_name: Optional[str] = None
+    history_id: str
+    status: str
+
+
+class RenameApplyItemReq(BaseModel):
+    """
+    One rename to perform. Paths here are server-side state echoed back from the diff, not
+    user input: `apply_rename` refuses anything whose `old_path` is absent from disk.
+    """
+    file_id: str
+    old_path: str
+    new_path: str
 
 
 class RenameApplyReq(BaseModel):
-    workspace_id: str
-    apply_all: bool = True
+    items: Optional[List[RenameApplyItemReq]] = None
+    history_id: Optional[str] = None
 
 
-class WatcherStatusRes(BaseModel):
+class RenameUndoReq(BaseModel):
+    history_id: Optional[str] = None
+
+
+class WatcherConfigRes(BaseModel):
     workspace_id: str
+    mode: str
     is_enabled: bool
     debounce_ms: int
 
 
 class WatcherConfigReq(BaseModel):
-    workspace_id: str
-    is_enabled: bool
+    mode: str = "manual"
     debounce_ms: int = 500
 
 
-class AnalyticsDashboardRes(BaseModel):
+class WatcherStatusRes(BaseModel):
     workspace_id: str
-    total_files: int
-    total_wikis: int
-    total_tokens: int
+    mode: str
+    is_enabled: bool
+    queued_items_count: int
+
+
+class AnalyticsEventReq(BaseModel):
+    event_type: str = "deeplink_click"
+    file_id: Optional[str] = None
+    wiki_id: Optional[str] = None
+    tokens_used: int = 0
+    # DEC-16: 0 means "no cost" (Option B), null means "not measured". The service applies that
+    # distinction, so this stays Optional rather than defaulting to 0.0.
+    cost_usd: Optional[float] = None
+
+
+class AnalyticsEventRes(BaseModel):
+    log_id: str
+    workspace_id: str
+    event_type: str
+    file_id: Optional[str] = None
+    wiki_id: Optional[str] = None
+    tokens_used: int
+    cost_usd: Optional[float] = None
+
+
+class AnalyticsPeriodRes(BaseModel):
+    """DEC-11: caller-supplied UTC instants, echoed back. The backend never infers a boundary."""
+    from_time: Optional[str] = None
+    to_time: Optional[str] = None
+
+
+class AnalyticsSummaryRes(BaseModel):
+    workspace_id: str
+    period: AnalyticsPeriodRes
+    saved_time_minutes: float
+    total_tokens_used: int
     total_cost_usd: float
+    deeplink_clicks_count: int
+    watcher_updates_count: int
+    compression_ratio: str
+    knowledge_ratio_scope: str
+
+
+class DeepLinkOpenReq(BaseModel):
+    """DEC-08: `file_id` only. A caller-supplied path is never accepted."""
+    file_id: str = Field(..., min_length=1)
+
+
+class DeepLinkOpenRes(BaseModel):
+    status: str
+    file_id: str
+    opened_path: str
+
+
+class DeepLinkStatusRes(BaseModel):
+    """
+    DL-QRY-01. `is_broken` is true when the row's `current_path` is missing from disk, or when
+    the file_id has no row at all — in which case `file_name`/`current_path` are null.
+    """
+    file_id: str
+    is_broken: bool
+    reason: Optional[str] = None
+    file_name: Optional[str] = None
+    current_path: Optional[str] = None

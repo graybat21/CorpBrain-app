@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { TitleBar } from './components/TitleBar';
 import { Sidebar } from './components/Sidebar';
 import { ToastContainer } from './components/ToastContainer';
@@ -11,6 +11,13 @@ import { useAppStore } from './store/appStore';
 
 export const App: React.FC = () => {
   const activeTab = useAppStore((state) => state.activeTab);
+  const bootstrap = useAppStore((state) => state.bootstrap);
+
+  // One backend read on mount. `bootstrap` is a stable store action, so this does not re-run
+  // per tab switch — each page refetches its own data instead.
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
 
   const renderContent = () => {
     switch (activeTab) {

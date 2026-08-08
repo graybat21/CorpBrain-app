@@ -6,13 +6,14 @@ import {
   FileDiff,
   ShieldAlert,
   FolderPlus,
-  ChevronRight,
+  Check,
   HardDrive
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
 
 export const Sidebar: React.FC = () => {
-  const { activeTab, setActiveTab, currentWorkspace, workspaces, addToast } = useAppStore();
+  const { activeTab, setActiveTab, currentWorkspace, workspaces, selectWorkspace, addToast } =
+    useAppStore();
 
   const navItems = [
     { id: 'dashboard', label: '대시보드 (Analytics)', icon: LayoutDashboard },
@@ -30,27 +31,56 @@ export const Sidebar: React.FC = () => {
           <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5 flex items-center justify-between">
             <span>현재 워크스페이스</span>
             <button
-              onClick={() => addToast('info', '새 워크스페이스 추가 다이얼로그를 엽니다.')}
+              onClick={() =>
+                // WS-FE-02 (issue #63) owns the creation modal and the OS folder picker; a
+                // pywebview folder dialog is not reachable from here yet.
+                addToast('info', '워크스페이스 추가는 후속 작업(#63)에서 제공됩니다.')
+              }
               className="hover:text-indigo-400 p-0.5 transition"
               title="워크스페이스 추가"
             >
               <FolderPlus className="w-3.5 h-3.5" />
             </button>
           </div>
-          <div className="bg-slate-800/90 border border-slate-700/70 rounded-lg p-2.5 flex items-center justify-between cursor-pointer hover:border-indigo-500/50 transition">
-            <div className="flex items-center space-x-2 overflow-hidden">
-              <HardDrive className="w-4 h-4 text-indigo-400 shrink-0" />
-              <div className="truncate">
-                <p className="text-xs font-medium text-slate-200 truncate">
-                  {currentWorkspace?.workspace_name || '선택된 워크스페이스 없음'}
-                </p>
-                <p className="text-[10px] text-slate-400 font-mono truncate">
-                  {currentWorkspace?.root_path}
-                </p>
-              </div>
+
+          {/* WS-FE-01: the real workspace list. Clicking one reloads that workspace's files. */}
+          {workspaces.length === 0 ? (
+            <div className="bg-slate-800/60 border border-slate-700/70 rounded-lg p-2.5 text-[11px] text-slate-400">
+              등록된 워크스페이스가 없습니다.
             </div>
-            <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-          </div>
+          ) : (
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {workspaces.map((ws) => {
+                const isCurrent = ws.workspace_id === currentWorkspace?.workspace_id;
+                return (
+                  <button
+                    key={ws.workspace_id}
+                    onClick={() => void selectWorkspace(ws.workspace_id)}
+                    className={`w-full text-left rounded-lg p-2.5 flex items-center justify-between transition border ${
+                      isCurrent
+                        ? 'bg-slate-800/90 border-indigo-500/60'
+                        : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2 overflow-hidden">
+                      <HardDrive
+                        className={`w-4 h-4 shrink-0 ${isCurrent ? 'text-indigo-400' : 'text-slate-500'}`}
+                      />
+                      <div className="truncate">
+                        <p className="text-xs font-medium text-slate-200 truncate">
+                          {ws.workspace_name}
+                        </p>
+                        <p className="text-[10px] text-slate-400 font-mono truncate">
+                          {ws.root_path}
+                        </p>
+                      </div>
+                    </div>
+                    {isCurrent && <Check className="w-3.5 h-3.5 text-indigo-400 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Navigation Menu */}

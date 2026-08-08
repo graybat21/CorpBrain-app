@@ -23,6 +23,11 @@ class RenameService:
     def __init__(self, db_mgr: DatabaseManager, pii_filter: Optional[PIIFilter] = None):
         self.db_mgr = db_mgr
         self.pii_filter = pii_filter or PIIFilter()
+        # The history row written by the most recent process_rename_suggestions call, read back
+        # by generate_rename_diff. Per-instance rather than returned from
+        # process_rename_suggestions so that method's List return type is unchanged for its
+        # three existing callers.
+        self._last_history_id: Optional[str] = None
 
     @classmethod
     def build_prompt_context(cls, file_meta: Dict[str, Any]) -> Dict[str, Any]:
@@ -63,6 +68,23 @@ class RenameService:
             return False
 
         return True
+
+    def generate_rename_diff(
+        self,
+        workspace_id: str,
+        files: List[Dict[str, Any]],
+        mock_llm_callback: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        `process_rename_suggestions` plus the `history_id` of the row it wrote.
+
+        The API layer needs that id: DEC-08 keeps absolute paths off the client, so the frontend
+        cannot assemble the `items` list `apply_rename` takes and must hand back the id instead.
+        The id was previously reachable only by re-querying Rename_History, which would put SQL
+        outside a Repository (DEC-05) or make the client guess the newest row.
+        """
+        items = self.process_rename_suggestions(workspace_id, files, mock_llm_callback)
+        return {"items": items, "history_id": self._last_history_id}
 
     def process_rename_suggestions(
         self,
@@ -147,10 +169,11 @@ class RenameService:
         history_id = str(uuid.uuid4())
         with self.db_mgr.transaction() as conn:
             conn.execute(
-                """INSERT INTO Rename_History (history_id, workspace_id, old_paths, new_paths)
-                   VALUES (?, ?, ?, ?);""",
-                (history_id, workspace_id, json.dumps(old_paths_list), json.dumps(new_paths_list)),
+                """INSERT INTO Rename_History (history_id, workspace_id, old_paths, new_paths, status)
+                   VALUES (?, ?, ?, ?, ?);""",
+                (history_id, workspace_id, json.dumps(old_paths_list), json.dumps(new_paths_list), "pending"),
             )
+        self._last_history_id = history_id
 
         return diff_results
 
@@ -232,6 +255,17 @@ class RenameService:
                 })
 
         status = "applied" if not failed else "multi_status"
+
+        # Update the Rename_History row's status to reflect completion (issue #90 fix).
+        # DEC-05: SQL only inside Repository classes, but Rename_History has no dedicated repository
+        # yet, and this is a single-row write tied to the rename transaction, so it stays here.
+        if history_id:
+            with self.db_mgr.transaction() as conn:
+                conn.execute(
+                    "UPDATE Rename_History SET status = ? WHERE history_id = ?;",
+                    (status, history_id)
+                )
+
         return {
             "status": status,
             "applied_count": len(succeeded),

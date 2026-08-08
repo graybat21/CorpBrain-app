@@ -1,21 +1,42 @@
+import logging
 import secrets
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.backend.api.dtos import (
+    AnalyticsEventReq,
+    AnalyticsEventRes,
+    AnalyticsSummaryRes,
     ApiResponse,
+    DeepLinkOpenReq,
+    DeepLinkOpenRes,
+    DeepLinkStatusRes,
+    FileItemRes,
+    FileListRes,
+    HealthRes,
     InterruptedTaskItemRes,
     InterruptedTaskListRes,
+    LlmConfigUpdatedRes,
     LlmHealthCheckRes,
     LlmOptionReq,
+    PendingRenameDiffItemRes,
+    RenameApplyReq,
     RenameDiffRes,
+    RenameUndoReq,
+    ScanSummaryRes,
     TaskAcceptedRes,
     TaskProgressRes,
     TaskResultRes,
+    WatcherConfigReq,
+    WatcherConfigRes,
+    WatcherStatusRes,
     WorkspaceCreateReq,
+    WorkspaceDeletedRes,
     WorkspaceItemRes,
     WorkspaceListRes,
 )
@@ -26,6 +47,95 @@ from src.backend.repositories.workspace_repository import WorkspaceRepository
 from src.backend.services.scanner_service import ScannerService
 from src.backend.services.task_service import TaskQueryService, TaskRunner
 from src.backend.services.workspace_service import WorkspaceService
+
+logger = logging.getLogger(__name__)
+
+# DEC-03: FastAPI's own HTTPException carries a status code but no error code, so the ones
+# raised inside Starlette (404 for an unrouted path, 405 for a wrong method) need mapping onto
+# the standard table. Anything unlisted becomes INTERNAL_ERROR rather than a code invented here
+# — adding a code requires updating the DEC-03 table in the same change.
+_HTTP_STATUS_TO_ERROR_CODE = {
+    status.HTTP_400_BAD_REQUEST: "VALIDATION_FAILED",
+    status.HTTP_401_UNAUTHORIZED: "UNAUTHORIZED",
+    status.HTTP_403_FORBIDDEN: "UNAUTHORIZED",
+    status.HTTP_404_NOT_FOUND: "NOT_FOUND",
+    status.HTTP_405_METHOD_NOT_ALLOWED: "NOT_FOUND",
+    status.HTTP_422_UNPROCESSABLE_ENTITY: "VALIDATION_FAILED",
+}
+
+
+def _install_exception_handlers(app: FastAPI) -> None:
+    """
+    Normalize every error path onto the DEC-03 envelope.
+
+    Without these, FastAPI answers a validation failure with its own `{"detail": [...]}` and an
+    unhandled exception with the plain text `Internal Server Error`. Both bypass the envelope,
+    and the second one leaks whatever the exception message holds — which for this app is
+    routinely an absolute path (`sqlite3.OperationalError` on `%LocalAppData%\\CorpBrain\\...`)
+    or a traceback under a debug server. That is CORE #6 in docs/loop/DECISION_LOG.md.
+
+    The rule these enforce: the response body carries a code and a human-readable message and
+    nothing else. Exception text and tracebacks go to the local rolling log via `logger`.
+    """
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        code = _HTTP_STATUS_TO_ERROR_CODE.get(exc.status_code, "INTERNAL_ERROR")
+        # `exc.detail` is set by our own code or by Starlette's routing ("Not Found"), never by
+        # an exception's str(), so it is safe to surface. A 5xx detail is not — it can carry
+        # arbitrary text — so it is logged and replaced.
+        if exc.status_code >= 500:
+            logger.error("HTTPException %s on %s: %s", exc.status_code, request.url.path, exc.detail)
+            message = "요청 처리 중 내부 오류가 발생했습니다."
+        else:
+            message = str(exc.detail)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=ApiResponse[None].fail(code, message).model_dump(),
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        """
+        Pydantic's error list, reduced to a field name and a message.
+
+        `exc.errors()` entries can include an `input` value echoing the raw request body, which
+        for this app may hold an API key (`POST /api/v1/config/llm`) — DEC-12 forbids putting
+        that in a response. Only `loc` and `msg` are copied out.
+        """
+        errors = exc.errors()
+        field = None
+        details: Dict[str, Any] = {}
+        for err in errors:
+            # loc is ('body', 'llm_mode') — drop the source segment to name the field itself.
+            parts = [str(p) for p in err.get("loc", ()) if p not in ("body", "query", "path")]
+            name = ".".join(parts) if parts else "request"
+            details[name] = err.get("msg", "invalid value")
+            if field is None:
+                field = name
+        first = details.get(field, "요청 값이 유효하지 않습니다.") if field else "요청 값이 유효하지 않습니다."
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content=ApiResponse[None]
+            .fail("VALIDATION_FAILED", first, field=field, details=details)
+            .model_dump(),
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        """
+        Last resort. The exception is logged with its traceback and the client gets a code.
+
+        `str(exc)` is never sent: an OSError stringifies to the absolute path it failed on, and
+        DEC-03 forbids absolute internal paths in a response body.
+        """
+        logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse[None]
+            .fail("INTERNAL_ERROR", "요청 처리 중 내부 오류가 발생했습니다.")
+            .model_dump(),
+        )
 
 
 class _LazyVectorStore:
@@ -97,6 +207,9 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
     app.state.task_runner = TaskRunner(db_mgr, task_repo=app.state.task_repo)
     app.state.task_query_service = TaskQueryService(db_mgr, task_repo=app.state.task_repo)
 
+    # DEC-03: every error leaves through the envelope, including the ones FastAPI raises itself.
+    _install_exception_handlers(app)
+
     # Middleware: Bearer token auth check for all /api/v1/* routes (DEC-02)
     @app.middleware("http")
     async def verify_bearer_token(request: Request, call_next):
@@ -116,11 +229,20 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         response = await call_next(request)
         return response
 
-    @app.get("/api/v1/health")
-    def health():
-        return ApiResponse.success({"status": "ok", "app": "CorpBrain"})
+    # Every route carries an explicit response_model. DEC-02 makes the generated OpenAPI schema
+    # the contract SSOT, and a route without one contributes an empty `{}` response schema —
+    # there is then nothing for the frontend types to be generated from. tests/test_ws_fe_01.py
+    # asserts this holds for every /api/v1 route so a new one cannot skip it.
 
-    @app.post("/api/v1/workspace", status_code=status.HTTP_201_CREATED)
+    @app.get("/api/v1/health", response_model=ApiResponse[HealthRes])
+    def health():
+        return ApiResponse.success(HealthRes(status="ok", app="CorpBrain"))
+
+    @app.post(
+        "/api/v1/workspace",
+        status_code=status.HTTP_201_CREATED,
+        response_model=ApiResponse[WorkspaceItemRes],
+    )
     def create_workspace(req: WorkspaceCreateReq):
         try:
             ws = app.state.ws_service.create_workspace(req.workspace_name, req.root_paths)
@@ -129,22 +251,22 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         except FileNotFoundError as e:
             return JSONResponse(
                 status_code=status.HTTP_404_NOT_FOUND,
-                content=ApiResponse[None].fail("NOT_FOUND", str(e)).model_dump(),
+                content=ApiResponse[None].fail("PATH_NOT_ACCESSIBLE", str(e)).model_dump(),
             )
         except ValueError as e:
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                content=ApiResponse[None].fail("BAD_REQUEST", str(e)).model_dump(),
+                content=ApiResponse[None].fail("VALIDATION_FAILED", str(e)).model_dump(),
             )
 
-    @app.get("/api/v1/workspace")
+    @app.get("/api/v1/workspace", response_model=ApiResponse[WorkspaceListRes])
     def list_workspaces():
         workspaces = app.state.ws_service.list_workspaces()
         items = [WorkspaceItemRes(**ws) for ws in workspaces]
         res = WorkspaceListRes(items=items, total=len(items))
         return ApiResponse.success(res)
 
-    @app.get("/api/v1/workspace/{workspace_id}")
+    @app.get("/api/v1/workspace/{workspace_id}", response_model=ApiResponse[WorkspaceItemRes])
     def get_workspace(workspace_id: str):
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
@@ -154,7 +276,7 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             )
         return ApiResponse.success(WorkspaceItemRes(**ws))
 
-    @app.delete("/api/v1/workspace/{workspace_id}")
+    @app.delete("/api/v1/workspace/{workspace_id}", response_model=ApiResponse[WorkspaceDeletedRes])
     def delete_workspace(workspace_id: str):
         deleted = app.state.ws_service.delete_workspace(workspace_id)
         if not deleted:
@@ -162,7 +284,50 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
                 status_code=status.HTTP_404_NOT_FOUND,
                 content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
             )
-        return ApiResponse.success({"deleted": True, "workspace_id": workspace_id})
+        return ApiResponse.success(WorkspaceDeletedRes(deleted=True, workspace_id=workspace_id))
+
+    # --- File List Query (WS-FE-01 / ANA-FE-01) ---
+
+    @app.get("/api/v1/workspace/{workspace_id}/file", response_model=ApiResponse[FileListRes])
+    def list_workspace_files(workspace_id: str):
+        """
+        The scanned files of a workspace, with their fast-analysis importance scores.
+
+        `FileRepository.list_by_workspace` already existed but was reachable only from inside
+        the service layer, so the dashboard and the file explorer had no way to show anything
+        (issue #91: "대시보드는 항상 0을 표시한다"). Path is singular per DEC-03.
+
+        Unpaginated on purpose: SCAN-CMD-02 caps a workspace at 10,000 files, and the UI needs
+        the full set to compute its own score histogram. If that cap ever rises, this needs a
+        limit/offset before it needs anything else.
+        """
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+        rows = app.state.scanner_service.file_repo.list_by_workspace(workspace_id)
+        # Field-by-field rather than **row: File_Meta rows carry original_path, which DEC-08
+        # keeps as audit-only data. Constructing explicitly means a future column cannot leak
+        # into the response just by being added to the table.
+        items: List[FileItemRes] = [
+            FileItemRes(
+                file_id=r["file_id"],
+                workspace_id=r["workspace_id"],
+                file_name=r["file_name"],
+                extension=r["extension"],
+                current_path=r["current_path"],
+                size_bytes=r["size_bytes"],
+                last_modified=r["last_modified"],
+                parse_status=r["parse_status"],
+                importance_score=r["importance_score"] or 0,
+                created_at=r["created_at"],
+                updated_at=r["updated_at"],
+            )
+            for r in rows
+        ]
+        return ApiResponse.success(FileListRes(workspace_id=workspace_id, items=items, total=len(items)))
 
     # --- API-002: Scan & Analysis Endpoints (DEC-04: 202 + task_id, then poll) ---
 
@@ -198,7 +363,11 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             return _accepted(existing)
         return _accepted(app.state.task_runner.submit(task_type, body, workspace_id=workspace_id))
 
-    @app.post("/api/v1/workspace/{workspace_id}/scan", status_code=status.HTTP_202_ACCEPTED)
+    @app.post(
+        "/api/v1/workspace/{workspace_id}/scan",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=ApiResponse[TaskAcceptedRes],
+    )
     def scan_workspace_endpoint(workspace_id: str):
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
@@ -222,7 +391,11 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
 
         return _submit_once("scan", workspace_id, body)
 
-    @app.post("/api/v1/workspace/{workspace_id}/analysis/fast", status_code=status.HTTP_202_ACCEPTED)
+    @app.post(
+        "/api/v1/workspace/{workspace_id}/analysis/fast",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=ApiResponse[TaskAcceptedRes],
+    )
     def fast_analysis_endpoint(workspace_id: str):
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
@@ -246,7 +419,7 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
 
     # --- ANA-QRY-02: Task Progress Polling (DEC-04, 1s intervals) ---
 
-    @app.get("/api/v1/analyze/{task_id}/progress")
+    @app.get("/api/v1/analyze/{task_id}/progress", response_model=ApiResponse[TaskProgressRes])
     def task_progress_endpoint(task_id: str):
         progress = app.state.task_query_service.get_progress(task_id)
         if progress is None:
@@ -256,7 +429,7 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             )
         return ApiResponse.success(TaskProgressRes(**progress))
 
-    @app.get("/api/v1/task/{task_id}/result")
+    @app.get("/api/v1/task/{task_id}/result", response_model=ApiResponse[TaskResultRes])
     def task_result_endpoint(task_id: str):
         """
         A finished task's outcome, fetched once after polling reports a terminal status.
@@ -276,7 +449,7 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             return JSONResponse(status_code=status.HTTP_207_MULTI_STATUS, content=res.model_dump())
         return res
 
-    @app.get("/api/v1/task/interrupted")
+    @app.get("/api/v1/task/interrupted", response_model=ApiResponse[InterruptedTaskListRes])
     def interrupted_tasks_endpoint(workspace_id: Optional[str] = None):
         """
         Tasks stranded by a crash, so the UI can ask whether to resume.
@@ -293,7 +466,7 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
 
     # --- API-003: LLM Config, Rename, Watcher, Analytics Endpoints ---
 
-    @app.get("/api/v1/config/llm")
+    @app.get("/api/v1/config/llm", response_model=ApiResponse[LlmHealthCheckRes])
     def get_llm_config():
         # LLM-QRY-01: report the real probe result, never a hardcoded is_healthy (DEC-13).
         from src.backend.services.query_services import LlmQueryService
@@ -309,16 +482,17 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             error_code=health["error_code"],
         ))
 
-    @app.post("/api/v1/config/llm")
+    @app.post("/api/v1/config/llm", response_model=ApiResponse[LlmConfigUpdatedRes])
     def update_llm_config(req: LlmOptionReq):
         from src.backend.config_manager import ConfigManager
         cm = ConfigManager(db_mgr)
         cm.set("llm_mode", req.llm_mode)
         if req.api_key is not None:
             cm.set_api_key(req.api_key)
-        return ApiResponse.success({"updated": True, "llm_mode": req.llm_mode})
+        # DEC-12: the key is never echoed back, not even masked.
+        return ApiResponse.success(LlmConfigUpdatedRes(updated=True, llm_mode=req.llm_mode))
 
-    @app.post("/api/v1/workspace/{workspace_id}/rename/diff")
+    @app.post("/api/v1/workspace/{workspace_id}/rename/diff", response_model=ApiResponse[RenameDiffRes])
     def generate_rename_diff_endpoint(workspace_id: str):
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
@@ -329,8 +503,14 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         from src.backend.services.rename_service import RenameService
         files = app.state.scanner_service.file_repo.list_by_workspace(workspace_id)
         rs = RenameService(db_mgr)
-        diff_items = rs.process_rename_suggestions(workspace_id, files)
-        return ApiResponse.success(RenameDiffRes(workspace_id=workspace_id, items=diff_items))
+        # history_id comes back with the items because DEC-08 keeps absolute paths off the
+        # client: the frontend applies a diff by handing this id back, not by sending paths.
+        diff = rs.generate_rename_diff(workspace_id, files)
+        return ApiResponse.success(RenameDiffRes(
+            workspace_id=workspace_id,
+            items=diff["items"],
+            history_id=diff["history_id"],
+        ))
 
     def _rename_task_result(res: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -350,16 +530,22 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             "result": res,
         }
 
-    @app.post("/api/v1/workspace/{workspace_id}/rename/apply", status_code=status.HTTP_202_ACCEPTED)
-    def apply_rename_endpoint(workspace_id: str, payload: Optional[Dict[str, Any]] = None):
+    @app.post(
+        "/api/v1/workspace/{workspace_id}/rename/apply",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=ApiResponse[TaskAcceptedRes],
+    )
+    def apply_rename_endpoint(workspace_id: str, payload: Optional[RenameApplyReq] = None):
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
             return JSONResponse(
                 status_code=status.HTTP_404_NOT_FOUND,
                 content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
             )
-        items = payload.get("items") if payload else None
-        history_id = payload.get("history_id") if payload else None
+        # RenameService takes plain dicts; dumping the validated models keeps the DTO boundary
+        # at the API layer instead of pushing Pydantic into the service (CLAUDE.md §4).
+        items = [item.model_dump() for item in payload.items] if payload and payload.items else None
+        history_id = payload.history_id if payload else None
 
         def body(ctx):
             from src.backend.services.rename_service import RenameService
@@ -373,15 +559,19 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         # it is persisted to result_json and read back from GET /api/v1/task/{id}/result.
         return _submit_once("rename_apply", workspace_id, body)
 
-    @app.post("/api/v1/workspace/{workspace_id}/rename/undo", status_code=status.HTTP_202_ACCEPTED)
-    def undo_rename_endpoint(workspace_id: str, payload: Optional[Dict[str, Any]] = None):
+    @app.post(
+        "/api/v1/workspace/{workspace_id}/rename/undo",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=ApiResponse[TaskAcceptedRes],
+    )
+    def undo_rename_endpoint(workspace_id: str, payload: Optional[RenameUndoReq] = None):
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
             return JSONResponse(
                 status_code=status.HTTP_404_NOT_FOUND,
                 content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
             )
-        history_id = payload.get("history_id") if payload else None
+        history_id = payload.history_id if payload else None
 
         def body(ctx):
             from src.backend.services.rename_service import RenameService
@@ -393,7 +583,17 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
 
         return _submit_once("rename_undo", workspace_id, body)
 
-    @app.get("/api/v1/workspace/{workspace_id}/watcher/config")
+    def _watcher_config_res(cfg: Dict[str, Any]) -> WatcherConfigRes:
+        # is_enabled is stored as SQLite INTEGER 0/1; the DTO exposes a real bool so the
+        # frontend does not end up with a truthiness check on a number (DEC-03).
+        return WatcherConfigRes(
+            workspace_id=cfg["workspace_id"],
+            mode=cfg["mode"],
+            is_enabled=bool(cfg["is_enabled"]),
+            debounce_ms=cfg["debounce_ms"],
+        )
+
+    @app.get("/api/v1/workspace/{workspace_id}/watcher/config", response_model=ApiResponse[WatcherConfigRes])
     def get_watcher_config_endpoint(workspace_id: str):
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
@@ -405,10 +605,10 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         if not hasattr(app.state, "watcher_service"):
             app.state.watcher_service = WatcherService(db_mgr, app.state.scanner_service.file_repo)
         cfg = app.state.watcher_service.get_config(workspace_id)
-        return ApiResponse.success(cfg)
+        return ApiResponse.success(_watcher_config_res(cfg))
 
-    @app.post("/api/v1/workspace/{workspace_id}/watcher/config")
-    def update_watcher_config_endpoint(workspace_id: str, payload: Dict[str, Any]):
+    @app.post("/api/v1/workspace/{workspace_id}/watcher/config", response_model=ApiResponse[WatcherConfigRes])
+    def update_watcher_config_endpoint(workspace_id: str, payload: WatcherConfigReq):
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
             return JSONResponse(
@@ -419,18 +619,18 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         if not hasattr(app.state, "watcher_service"):
             app.state.watcher_service = WatcherService(db_mgr, app.state.scanner_service.file_repo)
 
-        mode = payload.get("mode", "manual")
-        debounce_ms = payload.get("debounce_ms", 500)
         try:
-            cfg = app.state.watcher_service.update_config(workspace_id, mode, debounce_ms=debounce_ms)
-            return ApiResponse.success(cfg)
+            cfg = app.state.watcher_service.update_config(
+                workspace_id, payload.mode, debounce_ms=payload.debounce_ms
+            )
+            return ApiResponse.success(_watcher_config_res(cfg))
         except ValueError as e:
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                content=ApiResponse[None].fail("BAD_REQUEST", str(e)).model_dump(),
+                content=ApiResponse[None].fail("VALIDATION_FAILED", str(e), field="mode").model_dump(),
             )
 
-    @app.get("/api/v1/workspace/{workspace_id}/watcher/status")
+    @app.get("/api/v1/workspace/{workspace_id}/watcher/status", response_model=ApiResponse[WatcherStatusRes])
     def get_watcher_status_endpoint(workspace_id: str):
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
@@ -444,17 +644,17 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
 
         cfg = app.state.watcher_service.get_config(workspace_id)
         q_size = app.state.watcher_service.queue.qsize()
-        return ApiResponse.success({
-            "workspace_id": workspace_id,
-            "mode": cfg["mode"],
-            "is_enabled": bool(cfg["is_enabled"]),
-            "queued_items_count": q_size
-        })
+        return ApiResponse.success(WatcherStatusRes(
+            workspace_id=workspace_id,
+            mode=cfg["mode"],
+            is_enabled=bool(cfg["is_enabled"]),
+            queued_items_count=q_size,
+        ))
 
     # --- Analytics & Statistics Endpoints (STAT-CMD-01 & STAT-QRY-01) ---
 
-    @app.post("/api/v1/workspace/{workspace_id}/analytics/event")
-    def log_analytics_event_endpoint(workspace_id: str, payload: Dict[str, Any]):
+    @app.post("/api/v1/workspace/{workspace_id}/analytics/event", response_model=ApiResponse[AnalyticsEventRes])
+    def log_analytics_event_endpoint(workspace_id: str, payload: AnalyticsEventReq):
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
             return JSONResponse(
@@ -463,23 +663,17 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             )
         from src.backend.services.analytics_service import AnalyticsService
         svc = AnalyticsService(db_mgr)
-        event_type = payload.get("event_type", "deeplink_click")
-        file_id = payload.get("file_id")
-        wiki_id = payload.get("wiki_id")
-        tokens_used = payload.get("tokens_used", 0)
-        cost_usd = payload.get("cost_usd")
-
         res = svc.log_event(
             workspace_id,
-            event_type=event_type,
-            file_id=file_id,
-            wiki_id=wiki_id,
-            tokens_used=tokens_used,
-            cost_usd=cost_usd
+            event_type=payload.event_type,
+            file_id=payload.file_id,
+            wiki_id=payload.wiki_id,
+            tokens_used=payload.tokens_used,
+            cost_usd=payload.cost_usd
         )
-        return ApiResponse.success(res)
+        return ApiResponse.success(AnalyticsEventRes(**res))
 
-    @app.get("/api/v1/workspace/{workspace_id}/analytics/summary")
+    @app.get("/api/v1/workspace/{workspace_id}/analytics/summary", response_model=ApiResponse[AnalyticsSummaryRes])
     def get_analytics_summary_endpoint(
         workspace_id: str,
         from_time: Optional[str] = None,
@@ -494,39 +688,34 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         from src.backend.services.analytics_service import AnalyticsService
         svc = AnalyticsService(db_mgr)
         summary = svc.get_analytics_summary(workspace_id, from_time=from_time, to_time=to_time)
-        return ApiResponse.success(summary)
+        return ApiResponse.success(AnalyticsSummaryRes(**summary))
 
     # --- DeepLink Open Endpoint (DL-CMD-02) ---
 
-    @app.post("/api/v1/workspace/{workspace_id}/deeplink/open")
-    def deeplink_open_file_endpoint(workspace_id: str, payload: Dict[str, Any]):
+    @app.post("/api/v1/workspace/{workspace_id}/deeplink/open", response_model=ApiResponse[DeepLinkOpenRes])
+    def deeplink_open_file_endpoint(workspace_id: str, payload: DeepLinkOpenReq):
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
             return JSONResponse(
                 status_code=status.HTTP_404_NOT_FOUND,
                 content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
             )
-        file_id = payload.get("file_id")
-        if not file_id:
-            return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content=ApiResponse[None].fail("INVALID_INPUT", "file_id is required").model_dump(),
-            )
         from src.backend.services.deeplink_service import DeepLinkService
         svc = DeepLinkService(db_mgr)
-        result = svc.open_file(workspace_id, file_id)
+        # DEC-08: only file_id crosses the wire; the path is resolved server-side from File_Meta.
+        result = svc.open_file(workspace_id, payload.file_id)
         if result.get("status") == "error":
-            code = result.get("error_code", "UNKNOWN")
+            code = result.get("error_code", "INTERNAL_ERROR")
             http_status = status.HTTP_404_NOT_FOUND if code == "NOT_FOUND" else status.HTTP_422_UNPROCESSABLE_ENTITY
             return JSONResponse(
                 status_code=http_status,
                 content=ApiResponse[None].fail(code, result.get("message", "")).model_dump(),
             )
-        return ApiResponse.success(result)
+        return ApiResponse.success(DeepLinkOpenRes(**result))
 
     # --- DeepLink Query Endpoint (DL-QRY-01) ---
 
-    @app.get("/api/v1/workspace/{workspace_id}/deeplink/status")
+    @app.get("/api/v1/workspace/{workspace_id}/deeplink/status", response_model=ApiResponse[DeepLinkStatusRes])
     def deeplink_status_endpoint(workspace_id: str, file_id: str):
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
@@ -537,11 +726,11 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         from src.backend.services.query_services import DeepLinkQueryService
         svc = DeepLinkQueryService(db_mgr)
         result = svc.check_deeplink_status(workspace_id, file_id)
-        return ApiResponse.success(result)
+        return ApiResponse.success(DeepLinkStatusRes(**result))
 
     # --- Scan Query Endpoint (SCAN-QRY-01) ---
 
-    @app.get("/api/v1/workspace/{workspace_id}/scan/summary")
+    @app.get("/api/v1/workspace/{workspace_id}/scan/summary", response_model=ApiResponse[ScanSummaryRes])
     def scan_summary_endpoint(workspace_id: str):
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
@@ -551,12 +740,22 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             )
         from src.backend.services.query_services import ScanQueryService
         svc = ScanQueryService(db_mgr)
-        return ApiResponse.success(svc.get_scan_summary(workspace_id))
+        return ApiResponse.success(ScanSummaryRes(**svc.get_scan_summary(workspace_id)))
 
     # --- Rename Diff Query Endpoint (RN-QRY-01) ---
 
-    @app.get("/api/v1/workspace/{workspace_id}/rename/diff")
+    @app.get(
+        "/api/v1/workspace/{workspace_id}/rename/diff",
+        response_model=ApiResponse[List[PendingRenameDiffItemRes]],
+    )
     def rename_diff_query_endpoint(workspace_id: str):
+        """
+        The persisted `pending` diff, as opposed to POST on the same path which generates one.
+
+        Known 500 — issue #90: the query reads a `Rename_History.status` column that the schema
+        does not have. The route is typed here so the contract is in the OpenAPI schema, but the
+        frontend must not depend on it until #90 lands; RenamePage uses the POST form instead.
+        """
         ws = app.state.ws_service.get_workspace(workspace_id)
         if not ws:
             return JSONResponse(
@@ -565,14 +764,24 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             )
         from src.backend.services.query_services import RenameQueryService
         svc = RenameQueryService(db_mgr)
-        return ApiResponse.success(svc.get_pending_rename_diff(workspace_id))
+        items = svc.get_pending_rename_diff(workspace_id)
+        return ApiResponse.success([PendingRenameDiffItemRes(**item) for item in items])
 
     # --- Workspace List & Detail Query Endpoints (WS-QRY-01) ---
 
-    @app.get("/api/v1/workspaces")
+    @app.get("/api/v1/workspaces", response_model=ApiResponse[WorkspaceListRes])
     def list_all_workspaces_endpoint():
+        """
+        Duplicate of GET /api/v1/workspace, kept because WS-QRY-01 registered this path.
+
+        DEC-03 mandates singular resource paths, so the plural form is the deprecated one: it
+        now returns the same WorkspaceListRes envelope rather than a bare array, so a client
+        cannot come to depend on a second, differently-shaped response. New callers use the
+        singular path.
+        """
         from src.backend.services.query_services import WorkspaceQueryService
         svc = WorkspaceQueryService(db_mgr)
-        return ApiResponse.success(svc.list_workspaces())
+        items = [WorkspaceItemRes(**ws) for ws in svc.list_workspaces()]
+        return ApiResponse.success(WorkspaceListRes(items=items, total=len(items)))
 
     return app

@@ -612,7 +612,8 @@ def test_v002_upgrades_an_existing_v001_database_without_data_loss():
         upgraded = DatabaseManager(db_path=db_path, migrations_dir=MIGRATIONS_DIR)
         try:
             conn = upgraded.get_connection()
-            assert conn.execute("PRAGMA user_version;").fetchone()[0] == 2
+            # v003 adds Rename_History.status (issue #90), so the upgraded DB is now at version 3.
+            assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
             assert "result_json" in [r[1] for r in conn.execute("PRAGMA table_info(Async_Task);")]
             row = TaskRepository(upgraded).get("legacy-task")
             assert row["processed_count"] == 9

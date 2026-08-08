@@ -2,38 +2,60 @@ import React from 'react';
 import { BookOpen, ExternalLink, Link2, FileCheck } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import * as api from '../api/client';
+import { errorMessage } from '../api/client';
 import { useAppStore } from '../store/appStore';
 
 export const WikiPage: React.FC = () => {
-  const { files, addToast } = useAppStore();
-  const sampleFileId = files[0]?.file_id || 'f1-uuid-111';
+  const { files, currentWorkspace, addToast } = useAppStore();
 
+  /**
+   * Placeholder body, not wiki data.
+   *
+   * There is no wiki endpoint yet — ANA-QRY-01 (issue #7) owns
+   * `GET .../wiki/{folder_1depth}`, and ANA-CMD-03 (#3) owns generating the markdown. The
+   * anchors below are built from real scanned `file_id`s so the deeplink round trip is
+   * exercised end to end; replace this whole constant with the fetched `markdown_content`
+   * when #7 lands. Do not add a fabricated UUID fallback here: a click on one produces a
+   * NOT_FOUND that looks like a broken link in real data.
+   */
+  const anchoredFiles = files.slice(0, 2);
   const wikiContent = `
-# 2026년 기업 지능화 사업기획 종합 분석 보고서
+# 딥링크 위키 렌더링 미리보기
 
-## 1. 개요 및 사업 방향
-본 문서에는 2026년 상반기 전략 기획 내용이 수록되어 있습니다.
-관련 세부 마스터 플랜 문서 출처는 다음과 같습니다:
+## 1. 상태
+위키 생성(ANA-CMD-03) 및 조회(ANA-QRY-01)는 아직 구현되지 않았습니다. 아래 본문은 렌더링
+파이프라인 확인용 예시이며, 앵커만 실제 스캔된 파일을 가리킵니다.
 
-- 핵심 사업기획 마스터 플랜: [[file_id:${sampleFileId}]]
+${anchoredFiles.map((f) => `- ${f.file_name}: [[file_id:${f.file_id}]]`).join('\n') || '- 스캔된 파일이 없습니다. 파일 탐색기에서 스캔을 먼저 실행하세요.'}
 
 ## 2. 보안 및 개인정보 관리 수칙
 - 모든 로컬 파일 스캔 시 PII 마스킹 방어막이 작동합니다.
 - 절대 경로는 위키에 직접 저장되지 않으며, **Late Binding (DL-CMD-01 / DEC-08)** 앵커를 통해서만 참조됩니다.
 
 > [!NOTE]
-> 위 [[file_id:${sampleFileId}]] 앵커 링크를 클릭하면 SQLite 메타 DB에서 실시간으로 역추적된 최신 파일 경로가 해석됩니다.
+> 앵커 링크를 클릭하면 백엔드가 \`file_id\` 로 \`File_Meta.current_path\` 를 조회해 파일을 엽니다.
 `;
 
-  const handleAnchorClick = (fileId: string) => {
-    const targetFile = files.find((f) => f.file_id === fileId);
-    if (targetFile) {
-      addToast(
-        'success',
-        `Late Binding 해석 성공! [[file_id:${fileId}]] -> ${targetFile.current_path}`
-      );
-    } else {
-      addToast('warning', `해당 file_id (${fileId})의 로컬 경로를 찾을 수 없습니다.`);
+  /**
+   * DL-FE-02: resolve and open through the backend.
+   *
+   * The path is never sent or displayed — DEC-08 resolves `file_id` server-side. A missing row
+   * or a file gone from disk comes back as an error code, which is what a broken link is.
+   */
+  const handleAnchorClick = async (fileId: string) => {
+    if (!currentWorkspace) {
+      addToast('warning', '워크스페이스를 먼저 선택하세요.');
+      return;
+    }
+    try {
+      await api.openDeepLink(currentWorkspace.workspace_id, { file_id: fileId });
+      await api.logAnalyticsEvent(currentWorkspace.workspace_id, {
+        event_type: 'deeplink_click',
+        file_id: fileId,
+      });
+    } catch (err) {
+      addToast('warning', `링크를 열 수 없습니다: ${errorMessage(err)}`);
     }
   };
 
@@ -72,7 +94,7 @@ export const WikiPage: React.FC = () => {
                           return (
                             <button
                               key={idx}
-                              onClick={() => handleAnchorClick(fid)}
+                              onClick={() => void handleAnchorClick(fid)}
                               className="inline-flex items-center space-x-1 bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/60 px-2 py-0.5 rounded font-mono text-xs transition mx-1"
                             >
                               <FileCheck className="w-3 h-3 text-indigo-400" />
