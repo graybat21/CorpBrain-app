@@ -24,6 +24,7 @@ TASK_TYPES = frozenset({
     "llm_onboard",
     "rename_apply",
     "rename_undo",
+    "reembed",  # issue #88: AC S3 consent flow
 })
 
 # 'queued'/'running' are the live states; the rest are terminal. 'interrupted' is only ever
