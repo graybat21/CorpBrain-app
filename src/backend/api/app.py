@@ -49,6 +49,7 @@ from src.backend.repositories.workspace_repository import WorkspaceRepository
 from src.backend.services.scanner_service import ScannerService
 from src.backend.services.task_service import TaskQueryService, TaskRunner
 from src.backend.services.workspace_service import WorkspaceService
+from src.backend.utils.logging_setup import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,17 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         lifespan=_lifespan,
     )
 
+    # REQ-NF-014 (issue #24): attach the rolling file handler before anything else can fail.
+    # Until this call existed every `logger.*` in the codebase went to Python's last-resort
+    # stderr handler and was discarded in a windowed exe (DEC-01) — including the
+    # unhandled-exception traceback that `_install_exception_handlers` keeps out of the DEC-03
+    # response body on the stated grounds that it is "logged locally".
+    #
+    # Only when this app owns its DatabaseManager: a caller passing one in is a test or an
+    # embedding process, and writing into the real %LocalAppData%\CorpBrain\logs from a test
+    # run would violate the path isolation REQ-NF-004 asks for.
     if db_mgr is None:
+        configure_logging()
         db_mgr = DatabaseManager()
     if session_token is None:
         session_token = secrets.token_urlsafe(32)

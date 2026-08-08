@@ -53,6 +53,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from src.backend.api.app import create_app  # noqa: E402
 from src.backend.db import DatabaseManager  # noqa: E402
+from src.backend.utils.logging_setup import configure_logging  # noqa: E402
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -109,6 +110,10 @@ def main() -> int:
     parser.add_argument("--log-level", default="warning", help="uvicorn log level (default: warning)")
     args = parser.parse_args()
 
+    # Explicit because this script constructs its own DatabaseManager, and create_app only
+    # configures logging when it owns one (issue #24). Without this the dev host would be the
+    # one place with no log file, which is where diagnosis happens most.
+    log_handler = configure_logging()
     db_mgr = DatabaseManager()
     app = create_app(db_mgr)          # session_token=None -> secrets.token_urlsafe(32)
     token = app.state.session_token
@@ -156,6 +161,7 @@ def main() -> int:
     print()
     print(f"  SQLite   {db_mgr.db_path}")
     print(f"  Vectors  {db_mgr.vectors_dir}")
+    print(f"  Logs     {log_handler.baseFilename}")
     print("=" * BANNER_WIDTH)
     print("  Ctrl+C 로 종료")
     print()
