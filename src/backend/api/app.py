@@ -254,7 +254,6 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
     # the contract SSOT, and a route without one contributes an empty `{}` response schema —
     # there is then nothing for the frontend types to be generated from. tests/test_ws_fe_01.py
     # asserts this holds for every /api/v1 route so a new one cannot skip it.
-
     @app.get("/api/v1/health", response_model=ApiResponse[HealthRes])
     def health():
         return ApiResponse.success(HealthRes(status="ok", app="CorpBrain"))
@@ -636,7 +635,6 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             return result
 
         return _submit_once("wiki_generate", workspace_id, body)
-
     def _watcher_config_res(cfg: Dict[str, Any]) -> WatcherConfigRes:
         # is_enabled is stored as SQLite INTEGER 0/1; the DTO exposes a real bool so the
         # frontend does not end up with a truthiness check on a number (DEC-03).
