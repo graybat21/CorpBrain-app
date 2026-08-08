@@ -623,6 +623,8 @@ def test_v002_upgrades_an_existing_v001_database_without_data_loss():
             conn = upgraded.get_connection()
             # Derived from the migrations directory, not a literal: this assertion used to be
             # bumped by hand on every new migration, which makes it a chore rather than a check.
+            # The claim under test is "a v001 database upgrades to current without data loss",
+            # and "current" is whatever the directory holds.
             latest = max(
                 int(f.split("_")[0].lstrip("v"))
                 for f in os.listdir(MIGRATIONS_DIR)

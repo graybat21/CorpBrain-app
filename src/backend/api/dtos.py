@@ -129,6 +129,10 @@ class TaskProgressRes(BaseModel):
     processed: int
     total: int
     percent: float
+    # Human-readable current step (issue #29). Provisioning's steps are not interchangeable
+    # units, so a counter alone cannot say which model is downloading (DEC-13). None for the
+    # per-file tasks. Never carries a document path or content (REQ-NF-005).
+    progress_message: Optional[str] = None
     eta_sec: Optional[int] = None
     # DEC-03: the code only. error_message stays in the DB and the local log because it can
     # hold an exception string containing an absolute internal path.
@@ -209,6 +213,24 @@ class LlmHealthCheckRes(BaseModel):
     embedding_model_ready: bool = False
     generation_model_ready: bool = False
     error_code: Optional[str] = None
+
+
+class LlmOnboardReq(BaseModel):
+    """
+    LLM-CMD-03 / DEC-13: which role is being provisioned.
+
+    `embedding` needs only `nomic-embed-text` (~274MB) — required by **every** user including
+    Option A (DEC-06). `generation` additionally needs `qwen2.5:7b-instruct` (~4.7GB), Option B
+    only. The two are never presented as one bundled download, so the caller must say which.
+    """
+    purpose: str = Field(..., description="'embedding' or 'generation'")
+
+    @field_validator("purpose")
+    @classmethod
+    def validate_purpose(cls, v: str) -> str:
+        if v not in ("embedding", "generation"):
+            raise ValueError("purpose must be 'embedding' or 'generation'")
+        return v
 
 
 class LlmConfigUpdatedRes(BaseModel):

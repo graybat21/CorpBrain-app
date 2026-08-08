@@ -23,6 +23,7 @@ from src.backend.api.dtos import (
     InterruptedTaskListRes,
     LlmConfigUpdatedRes,
     LlmHealthCheckRes,
+    LlmOnboardReq,
     LlmOptionReq,
     PendingRenameDiffItemRes,
     RenameApplyReq,
@@ -529,6 +530,36 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             generation_model_ready=health["generation_model_ready"],
             error_code=health["error_code"],
         ))
+
+    @app.post(
+        "/api/v1/llm/onboard",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=ApiResponse[TaskAcceptedRes],
+    )
+    def llm_onboard_endpoint(req: LlmOnboardReq):
+        """
+        LLM-CMD-03 / DEC-13: start Ollama provisioning. 202 + task_id, progress via polling.
+
+        Returns immediately (DEC-04) — a 4.7GB pull cannot be a synchronous request, and there
+        is no push channel by design, so the frontend polls
+        `GET /api/v1/analyze/{task_id}/progress` at 1s intervals.
+
+        `workspace_id=None`: provisioning is machine-wide, not per-workspace. `_submit_once`
+        still de-duplicates it (see `TaskRepository.find_active`'s IS NULL branch) so a
+        double-clicked onboarding button cannot start two concurrent model downloads.
+        """
+        from src.backend.config_manager import ConfigManager
+        from src.backend.services.provisioning_service import ProvisioningService
+
+        service = ProvisioningService(ConfigManager(db_mgr))
+
+        def body(ctx):
+            # Progress lines are persisted as they arrive rather than only at the end: a model
+            # pull runs for minutes and DEC-04 requires the poller to see movement. The
+            # returned dict carries result.provision_mode, which DEC-13 requires recorded.
+            return service.onboard(req.purpose, progress=lambda message: ctx.note(message))
+
+        return _submit_once("llm_onboard", None, body)
 
     @app.post("/api/v1/config/llm", response_model=ApiResponse[LlmConfigUpdatedRes])
     def update_llm_config(req: LlmOptionReq):

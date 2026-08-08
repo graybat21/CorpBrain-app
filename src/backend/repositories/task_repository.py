@@ -132,6 +132,26 @@ class TaskRepository:
                 (delta, task_id),
             )
 
+    def set_progress_message(self, task_id: str, message: str) -> None:
+        """
+        Replace the task's human-readable status line (issue #29).
+
+        Committed immediately, like `increment_processed`: a model pull runs for minutes with no
+        counter movement, and a message buffered until the end would leave the 1s poll (DEC-04)
+        showing nothing at all for the longest part of the task.
+
+        Callers must not put a document path or content here — provisioning writes model names
+        and percentages only (REQ-NF-005).
+        """
+        with self.db_mgr.transaction() as conn:
+            conn.execute(
+                """UPDATE Async_Task
+                   SET progress_message = ?,
+                       updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                   WHERE task_id = ?;""",
+                (message, task_id),
+            )
+
     def finish(
         self,
         task_id: str,
@@ -209,16 +229,30 @@ class TaskRepository:
             )
         return [dict(row) for row in cursor.fetchall()]
 
-    def find_active(self, workspace_id: str, task_type: str) -> Optional[Dict[str, Any]]:
+    def find_active(self, workspace_id: Optional[str], task_type: str) -> Optional[Dict[str, Any]]:
         """
         The live ('queued'/'running') task of this type for this workspace, if any.
 
         Backs duplicate-run prevention, which is what SRS §6.2.8 says the
         `(workspace_id, task_type)` index exists for. Without it a double-clicked button
         starts two concurrent scans writing the same File_Meta rows.
+
+        `workspace_id=None` matches the workspace-independent tasks (`llm_onboard`, issue #29)
+        via `IS NULL`. It needs its own branch because SQL's `= NULL` is never true, so the
+        parameterised form would find nothing and happily start a second 4.7GB model download
+        on every click — the duplicate-run bug this method exists to prevent.
         """
         conn = self.db_mgr.get_connection()
         cursor = conn.cursor()
+        if workspace_id is None:
+            cursor.execute(
+                """SELECT * FROM Async_Task
+                   WHERE workspace_id IS NULL AND task_type = ? AND status IN ('queued', 'running')
+                   ORDER BY created_at DESC LIMIT 1;""",
+                (task_type,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
         cursor.execute(
             """SELECT * FROM Async_Task
                WHERE workspace_id = ? AND task_type = ? AND status IN ('queued', 'running')

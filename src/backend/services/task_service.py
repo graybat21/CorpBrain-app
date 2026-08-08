@@ -54,6 +54,16 @@ class TaskContext:
         """Commit progress for `delta` more processed items. Call AFTER the work, not before."""
         self._task_repo.increment_processed(self.task_id, delta)
 
+    def note(self, message: str) -> None:
+        """
+        Record a human-readable status line for the poller (issue #29).
+
+        For work whose steps are not interchangeable units — install, then a 274MB pull, then a
+        4.7GB pull — a counter alone cannot say which step is running, and DEC-13 requires the
+        two models to be distinguishable. Never pass a document path or content (REQ-NF-005).
+        """
+        self._task_repo.set_progress_message(self.task_id, message)
+
 
 class TaskRunner:
     """
@@ -199,6 +209,9 @@ class TaskQueryService:
             "processed": processed,
             "total": total,
             "percent": percent,
+            # None for the per-file tasks that never call ctx.note() (issue #29). `.get` rather
+            # than `[...]`: a row read before the v005 migration has no such key.
+            "progress_message": row.get("progress_message"),
             "eta_sec": self._estimate_eta(row, processed, total),
             # DEC-03: the code, never error_message — that column can hold an exception
             # string with an absolute path in it.
