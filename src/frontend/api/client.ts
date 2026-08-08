@@ -29,6 +29,7 @@ import type {
   InterruptedTaskListRes,
   LlmConfigUpdatedRes,
   LlmHealthCheckRes,
+  LlmOnboardReq,
   LlmOptionReq,
   RenameApplyReq,
   RenameDiffRes,
@@ -340,6 +341,25 @@ export function getLlmConfig(): Promise<LlmHealthCheckRes> {
  */
 export function setLlmConfig(payload: LlmOptionReq): Promise<LlmConfigUpdatedRes> {
   return data<LlmConfigUpdatedRes>('POST', API_PATHS.POST_config_llm, { body: payload });
+}
+
+/**
+ * LLM-CMD-03 / DEC-13: start Ollama provisioning.
+ *
+ * Returns a task_id, not a result (DEC-04) — a 4.7GB model pull cannot be a synchronous
+ * request. Poll `getTaskProgress` at 1s intervals and read `progress_message` to show which
+ * model is downloading: DEC-13 forbids presenting the ~274MB embedder and the ~4.7GB
+ * generation model as one combined download.
+ *
+ * `purpose: 'embedding'` is needed by every user including Option A (DEC-06);
+ * `'generation'` is Option B only and additionally pulls the generation model.
+ *
+ * On failure the task ends with `error_code: 'LLM_PROVISION_REQUIRED'`. On a closed network
+ * that is the expected outcome and the required-model list is in the task result — surface it
+ * rather than retrying, since the app never installs anything in `detect_only` mode.
+ */
+export function onboardLlm(payload: LlmOnboardReq): Promise<TaskAcceptedRes> {
+  return data<TaskAcceptedRes>('POST', API_PATHS.POST_llm_onboard, { body: payload });
 }
 
 // --- Rename ---

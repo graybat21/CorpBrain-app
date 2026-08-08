@@ -282,6 +282,20 @@ export interface LlmHealthCheckRes {
   error_code?: string | null;
 }
 
+/**
+ * LLM-CMD-03 / DEC-13: which role is being provisioned.
+ *
+ * `embedding` needs only `nomic-embed-text` (~274MB) — required by **every** user including
+ * Option A (DEC-06). `generation` additionally needs `qwen2.5:7b-instruct` (~4.7GB), Option B
+ * only. The two are never presented as one bundled download, so the caller must say which.
+ */
+export interface LlmOnboardReq {
+  /**
+   * 'embedding' or 'generation'
+   */
+  purpose: string;
+}
+
 export interface LlmOptionReq {
   /**
    * Option A (Cloud) or Option B (Local)
@@ -376,6 +390,7 @@ export interface TaskProgressRes {
   processed: number;
   total: number;
   percent: number;
+  progress_message?: string | null;
   eta_sec?: number | null;
   error_code?: string | null;
   workspace_id?: string | null;
@@ -482,6 +497,7 @@ export const API_PATHS = {
   GET_config_llm: "/api/v1/config/llm",
   POST_config_llm: "/api/v1/config/llm",
   GET_health: "/api/v1/health",
+  POST_llm_onboard: "/api/v1/llm/onboard",
   GET_task_interrupted: "/api/v1/task/interrupted",
   GET_task_result: "/api/v1/task/{task_id}/result",
   GET_workspace: "/api/v1/workspace",

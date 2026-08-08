@@ -1,0 +1,22 @@
+-- v005: human-readable progress text for a running task (issue #29 / LLM-CMD-03)
+--
+-- DEC-04 gives the poller `processed`/`total` counters, which describe a per-file loop well and
+-- provisioning badly: the steps are "probe reachability", "download installer", "install",
+-- "pull nomic-embed-text", "pull qwen2.5:7b-instruct" — different in kind and in duration, not
+-- interchangeable units. A bare "2/5" cannot say *which* model is downloading, and DEC-13
+-- explicitly requires the ~274MB embedder and the ~4.7GB generation model to be shown
+-- separately rather than summed into one bar.
+--
+-- One nullable TEXT column rather than a Provisioning_Progress table: this is the latest
+-- status line, not history — each write replaces the previous one, so there is nothing to
+-- normalise. It stays on Async_Task so the existing progress poll returns it without a join.
+--
+-- Never holds document content or a path. Provisioning messages name models and percentages
+-- only (REQ-NF-005), and no other task type writes to it today.
+--
+-- Numbered v005, not v004: v004 (Workspace_Root, issue #105) is in flight on another branch
+-- and two migrations sharing a number would leave whichever merged second permanently
+-- unapplied — `run_migrations` compares `PRAGMA user_version` with the file's number and skips
+-- anything not greater than it.
+
+ALTER TABLE Async_Task ADD COLUMN progress_message TEXT;

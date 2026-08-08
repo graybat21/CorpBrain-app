@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from typing import Any, Dict, FrozenSet, Optional
 from urllib.parse import urlparse
 
@@ -15,6 +16,22 @@ import urllib.error
 import urllib.request
 
 logger = logging.getLogger("CorpBrain.NetworkGuard")
+
+
+def _silent_unlink(path: str) -> None:
+    """
+    Delete a partial download, tolerating its absence.
+
+    A failed download must not leave a truncated installer on disk that a later step could
+    execute. This is a cleanup path, so a missing file is the expected case, not an error —
+    but the failure is logged rather than swallowed (CLAUDE.md: no bare except).
+    """
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.warning("[NetworkGuard] Could not remove partial download", exc_info=True)
 
 
 class EgressBlockedError(Exception):
@@ -94,6 +111,115 @@ class NetworkGuard:
                 "For small JSON payloads use get_json/post_json, which use the stdlib."
             )
         return httpx.request(method, url, **kwargs)
+
+    @classmethod
+    def is_reachable(cls, purpose: str, url: str, timeout: float = 5.0) -> bool:
+        """
+        Whitelist-validated HEAD probe — "can I reach this host right now?" (DEC-13).
+
+        This is the pre-check that decides `assisted` vs `detect_only`. It returns a bool
+        rather than raising for an unreachable host because unreachability is the *expected*
+        answer on a closed network (A1's default environment), not an error condition.
+
+        An `EgressBlockedError` from validation still propagates: a whitelist violation is a
+        programming error and must not be reported as "the network is down", which would
+        silently downgrade a blocked request into `detect_only`.
+
+        Some hosts reject HEAD with 405 while serving GET fine. A status response of any kind
+        still proves reachability, which is the only question being asked, so any HTTP answer
+        counts as True — including an error status.
+        """
+        cls.validate_egress(purpose, url)
+
+        try:
+            req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "CorpBrain"})
+            with urllib.request.urlopen(req, timeout=timeout):
+                return True
+        except urllib.error.HTTPError:
+            # The host answered, just not with 2xx. Reachable.
+            return True
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            logger.info(
+                f"[NetworkGuard] Host not reachable for purpose '{purpose}': {type(e).__name__}"
+            )
+            return False
+
+    @classmethod
+    def download_to_file(
+        cls,
+        purpose: str,
+        url: str,
+        dest_path: str,
+        timeout: float = 30.0,
+        progress_cb: Optional[Any] = None,
+    ) -> int:
+        """
+        Whitelist-validated streaming download to a local file (DEC-15).
+
+        Used for the Ollama installer (`purpose='provisioning'`). Streams in chunks rather than
+        reading into memory: the installer is hundreds of MB and a `resp.read()` would hold all
+        of it resident on a 16GB office PC (CON-05).
+
+        **Redirects are re-validated.** urllib follows them transparently, so a whitelisted
+        host redirecting to an arbitrary one would smuggle egress past the gate — the exact
+        hole DEC-15 exists to close. The final URL is checked against the same whitelist after
+        the fact, and a mismatch deletes the partial file and raises `EgressBlockedError`.
+
+        `progress_cb(downloaded_bytes, total_bytes_or_None)` is invoked per chunk so the caller
+        can persist DEC-04 progress. Exceptions from it are not caught — a broken callback
+        should surface, not corrupt a download silently.
+
+        Returns the number of bytes written.
+
+        Raises:
+            EgressBlockedError: initial or post-redirect host not whitelisted.
+            UpstreamStatusError: non-2xx response.
+            UpstreamUnavailableError: unreachable or timed out.
+        """
+        cls.validate_egress(purpose, url)
+
+        chunk_size = 1024 * 256
+        downloaded = 0
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "CorpBrain"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                status = getattr(resp, "status", 200)
+                if not (200 <= status < 300):
+                    raise UpstreamStatusError(status, purpose)
+
+                # geturl() is the URL after every redirect hop. Validating it is what makes
+                # the whitelist hold for a redirect chain.
+                cls.validate_egress(purpose, resp.geturl())
+
+                total_header = resp.headers.get("Content-Length") if resp.headers else None
+                total = int(total_header) if total_header and total_header.isdigit() else None
+
+                with open(dest_path, "wb") as out:
+                    while True:
+                        chunk = resp.read(chunk_size)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_cb is not None:
+                            progress_cb(downloaded, total)
+        except EgressBlockedError:
+            # A redirect left the whitelist. The partial file is deleted so a later step
+            # cannot execute a binary that came from an unvetted host.
+            _silent_unlink(dest_path)
+            raise
+        except urllib.error.HTTPError as e:
+            _silent_unlink(dest_path)
+            logger.warning(f"[NetworkGuard] Upstream HTTP {e.code} for purpose '{purpose}'")
+            raise UpstreamStatusError(e.code, purpose) from None
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            _silent_unlink(dest_path)
+            logger.info(f"[NetworkGuard] Unreachable host for purpose '{purpose}': {type(e).__name__}")
+            raise UpstreamUnavailableError(
+                f"Upstream unavailable for purpose '{purpose}': {type(e).__name__}"
+            ) from None
+
+        return downloaded
 
     @classmethod
     def get_json(cls, purpose: str, url: str, timeout: float = 5.0) -> Optional[Dict[str, Any]]:
