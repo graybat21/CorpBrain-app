@@ -112,9 +112,11 @@ class LLMResilienceService:
                     "error_message": str(e)
                 })
 
-        status = "completed" if not failed else "multi_status"
+        # Issue #89: AC expects 'completed' even on partial failure (some files succeeded).
+        # The HTTP 207 decision now comes from the presence of failed[] in the API layer,
+        # not from this status label.
         return {
-            "status": status,
+            "status": "completed",
             "succeeded_count": len(succeeded),
             "failed": failed,
             "aborted_early": False

@@ -545,12 +545,13 @@ class DeepAnalysisService:
         )
         unparsed_files = [dict(r) for r in cursor.fetchall()]
 
+        # Issue #89: match the schema that process_file_batch returns (no processed_count).
         if not unparsed_files:
             return {
                 "status": "completed",
-                "processed_count": 0,
                 "succeeded_count": 0,
                 "failed": [],
+                "aborted_early": False
             }
 
         return self.resilience_service.process_file_batch(

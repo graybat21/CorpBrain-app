@@ -146,7 +146,9 @@ def test_scenario_3_batch_run_with_single_file_failure_isolation(db_setup):
 
     batch_res = service.run_deep_analysis_batch(ws_id)
 
-    assert batch_res["status"] == "multi_status"
+    # Issue #89: partial failure still returns status='completed' (the task finished).
+    # HTTP 207 is decided by the API layer checking failed[].
+    assert batch_res["status"] == "completed"
     assert batch_res["succeeded_count"] == 2
     assert len(batch_res["failed"]) == 1
     assert batch_res["failed"][0]["file_id"] == "file_uuid_bad"

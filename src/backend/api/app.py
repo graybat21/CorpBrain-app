@@ -435,8 +435,13 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         A finished task's outcome, fetched once after polling reports a terminal status.
 
         Separate from the progress route because that one is polled every second and DEC-04
-        forbids putting payloads there. HTTP 207 when the task ended `multi_status`, so a
-        partially failed batch never reads as a plain success (DEC-03/DEC-16).
+        forbids putting payloads there. HTTP 207 when any files failed, so a partially failed
+        batch never reads as a plain success (DEC-03/DEC-16).
+
+        Issue #89: the 207 decision now comes from the presence of `failed[]` in result_json,
+        not from a string label. Services may use different internal status labels
+        ('completed', 'applied', 'reverted') and that's fine — what matters for the HTTP
+        status is whether any file failed.
         """
         result = app.state.task_query_service.get_result(task_id)
         if result is None:
@@ -445,7 +450,10 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
                 content=ApiResponse[None].fail("NOT_FOUND", f"Task {task_id} not found").model_dump(),
             )
         res = ApiResponse.success(TaskResultRes(**result))
-        if result["status"] == "multi_status":
+        # HTTP 207 if any files failed, regardless of the internal status label (issue #89).
+        # result["result"] is the parsed result_json from TaskRepository.get_result().
+        result_payload = result.get("result") or {}
+        if isinstance(result_payload, dict) and result_payload.get("failed"):
             return JSONResponse(status_code=status.HTTP_207_MULTI_STATUS, content=res.model_dump())
         return res
 
@@ -516,17 +524,16 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         """
         Map a RenameService result onto a task outcome.
 
-        RenameService reports 'applied'/'reverted'/'no_history' on success and 'multi_status'
-        on partial failure. Only the last of those is a terminal Async_Task status, so the
-        successful labels collapse to 'completed' while the service's own status is preserved
-        inside `result` — the frontend still sees which operation it was.
+        RenameService reports 'applied'/'reverted'/'no_history'/'multi_status'. Issue #89:
+        all of these map to Async_Task.status='completed' (the task finished), and the
+        service's own status is preserved inside `result` so the frontend can distinguish them.
 
-        `failed[]` is carried through untouched. It is the reason result_json exists: DEC-16
-        requires the per-file failures to reach the user, and a 202 response cannot carry them.
+        HTTP 207 is decided by the presence of `failed[]` in get_task_result_endpoint, not by
+        this status label. `failed[]` is carried through untouched — DEC-16 requires per-file
+        failures to reach the user, and a 202 response cannot carry them.
         """
-        service_status = res.get("status")
         return {
-            "status": "multi_status" if service_status == "multi_status" else "completed",
+            "status": "completed",
             "result": res,
         }
 
