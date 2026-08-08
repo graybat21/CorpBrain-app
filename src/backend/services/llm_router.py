@@ -60,13 +60,14 @@ class LLMRouter:
         """
         import anthropic
 
-        # Get API key (DPAPI encrypted)
-        api_key_encrypted = self.config_mgr.get("api_key_encrypted")
-        if not api_key_encrypted:
+        # DEC-12: decrypt only in memory, immediately before the call, then discard.
+        # Delegated to ConfigManager so DPAPI lives in exactly one place — this method used to
+        # carry a second, independent ctypes implementation that had drifted from
+        # utils/security.py (different DATA_BLOB field type, different flags) and had no
+        # non-Windows guard, so merely reaching it on a dev host raised AttributeError.
+        api_key = self.config_mgr.get_api_key()
+        if not api_key:
             raise ValueError("API_KEY_NOT_CONFIGURED")
-
-        # Decrypt API key (DEC-12: DPAPI, decrypt only in memory)
-        api_key = self._decrypt_api_key(api_key_encrypted)
 
         model = self.config_mgr.get("llm_cloud_model", "claude-sonnet-4")
         float(self.config_mgr.get("llm_timeout_connect", "10"))
@@ -162,57 +163,6 @@ class LLMRouter:
         except Exception as e:
             logger.error(f"[LLMRouter] Ollama error: {e}")
             raise
-
-    def _decrypt_api_key(self, encrypted_base64: str) -> str:
-        """
-        Decrypt API key using Windows DPAPI (DEC-12).
-
-        Decrypt only in memory, discard immediately after use.
-        """
-        import base64
-        import ctypes
-        from ctypes import wintypes
-
-        # Windows DPAPI structures
-        class DATA_BLOB(ctypes.Structure):
-            _fields_ = [
-                ("cbData", wintypes.DWORD),
-                ("pbData", ctypes.POINTER(ctypes.c_char))
-            ]
-
-        encrypted_bytes = base64.b64decode(encrypted_base64)
-
-        blob_in = DATA_BLOB()
-        blob_in.cbData = len(encrypted_bytes)
-        blob_in.pbData = ctypes.cast(
-            ctypes.create_string_buffer(encrypted_bytes, len(encrypted_bytes)),
-            ctypes.POINTER(ctypes.c_char)
-        )
-
-        blob_out = DATA_BLOB()
-
-        # Call CryptUnprotectData
-        crypt32 = ctypes.windll.crypt32
-        result = crypt32.CryptUnprotectData(
-            ctypes.byref(blob_in),
-            None,
-            None,
-            None,
-            None,
-            0,
-            ctypes.byref(blob_out)
-        )
-
-        if not result:
-            raise ValueError("DPAPI decrypt failed — key may have been encrypted on another account/PC")
-
-        try:
-            plaintext = ctypes.string_at(blob_out.pbData, blob_out.cbData)
-            return plaintext.decode("utf-8")
-        finally:
-            # Free memory allocated by CryptUnprotectData
-            kernel32 = ctypes.windll.kernel32
-            kernel32.LocalFree(blob_out.pbData)
 
     def health_check(self) -> Dict[str, Any]:
         """

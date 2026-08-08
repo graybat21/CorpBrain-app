@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
+from src.backend.utils.platform_compat import open_with_default_app
 
 
 class DeepLinkService:
@@ -64,7 +65,7 @@ class DeepLinkService:
     def open_file(self, workspace_id: str, file_id: str) -> Dict[str, Any]:
         """
         DL-CMD-02 / REQ-FUNC-021 / DEC-08:
-        Opens the file associated with file_id using os.startfile().
+        Opens the file associated with file_id in the OS default application.
         - Only accepts file_id, never a raw path (path injection prevention).
         - Resolves current_path via Late Binding from File_Meta at call time.
         - Returns DEC-03 compliant error codes on failure.
@@ -87,7 +88,9 @@ class DeepLinkService:
             }
 
         try:
-            os.startfile(path)  # Windows OS default application launch
+            # os.startfile on the shipped Windows target; `open`/`xdg-open` on a dev host.
+            # Every platform's failure arrives as OSError so the mapping below is uniform.
+            open_with_default_app(path)
             return {
                 "status": "success",
                 "file_id": file_id,

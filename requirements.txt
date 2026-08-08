@@ -4,7 +4,14 @@
 # Adding anything else requires documented technical justification.
 #
 # Versions are pinned with `==` on purpose: this file is the reproducible-environment
-# contract, and `requirements.lock.txt` records the full transitive closure.
+# contract. The full transitive closure is locked per platform, because one lock file cannot
+# serve both: pywebview resolves to pythonnet/clr_loader on Windows and pyobjc-* on macOS, so
+# installing the wrong one fails outright.
+#
+#   requirements.lock.windows.txt  <- the release-build lock (DEC-01: the exe ships from here)
+#   requirements.lock.macos.txt    <- development convenience on a non-Windows host
+#
+# This file itself is platform-neutral: every entry below installs on both.
 
 # --- Desktop shell (DEC-01) ---
 pywebview==6.2.1

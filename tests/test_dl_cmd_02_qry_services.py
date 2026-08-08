@@ -55,13 +55,16 @@ def test_scenario_1_deeplink_open_file_success(qry_setup):
     db_mgr, ws_id, f1_id, f1, tmpdir = qry_setup
     svc = DeepLinkService(db_mgr)
 
-    # Mock os.startfile since we can't actually open a doc in test env
-    with patch("os.startfile") as mock_start:
+    # Patch the launcher shim, not `os.startfile`: the attribute does not exist off Windows,
+    # so `patch("os.startfile")` raised AttributeError on a macOS/Linux dev host before the
+    # service was routed through platform_compat. Patching where the service looks the symbol
+    # up keeps this test host-independent and still proves the path is passed through verbatim.
+    with patch("src.backend.services.deeplink_service.open_with_default_app") as mock_open:
         result = svc.open_file(ws_id, f1_id)
         assert result["status"] == "success"
         assert result["file_id"] == f1_id
         assert result["opened_path"] == f1
-        mock_start.assert_called_once_with(f1)
+        mock_open.assert_called_once_with(f1)
 
 
 def test_scenario_2_deeplink_open_not_found(qry_setup):

@@ -513,10 +513,22 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
     @app.post("/api/v1/config/llm", response_model=ApiResponse[LlmConfigUpdatedRes])
     def update_llm_config(req: LlmOptionReq):
         from src.backend.config_manager import ConfigManager
+        from src.backend.utils.security import SecretStorageUnavailableError
         cm = ConfigManager(db_mgr)
         cm.set("llm_mode", req.llm_mode)
         if req.api_key is not None:
-            cm.set_api_key(req.api_key)
+            try:
+                cm.set_api_key(req.api_key)
+            except SecretStorageUnavailableError as exc:
+                # Only reachable on a non-Windows development host: DEC-12 storage is DPAPI and
+                # there is no fallback (a reversible one would be plaintext at rest). Mapped
+                # explicitly so the developer sees the actual reason instead of the generic
+                # INTERNAL_ERROR the catch-all handler would return. `str(exc)` is safe here —
+                # the message is a fixed string naming the platform, with no path or key in it.
+                return JSONResponse(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    content=ApiResponse[None].fail("INTERNAL_ERROR", str(exc)).model_dump(),
+                )
         # DEC-12: the key is never echoed back, not even masked.
         return ApiResponse.success(LlmConfigUpdatedRes(updated=True, llm_mode=req.llm_mode))
 
@@ -612,7 +624,11 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
 
     # --- Wiki Generation Endpoint (ANA-CMD-03) ---
 
-    @app.post("/api/v1/workspace/{workspace_id}/wiki/generate", status_code=status.HTTP_202_ACCEPTED)
+    @app.post(
+        "/api/v1/workspace/{workspace_id}/wiki/generate",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=ApiResponse[TaskAcceptedRes],
+    )
     def generate_wiki_endpoint(workspace_id: str):
         """
         Generate wiki markdown documents for all folders in a workspace (ANA-CMD-03).
@@ -635,6 +651,7 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             return result
 
         return _submit_once("wiki_generate", workspace_id, body)
+
     def _watcher_config_res(cfg: Dict[str, Any]) -> WatcherConfigRes:
         # is_enabled is stored as SQLite INTEGER 0/1; the DTO exposes a real bool so the
         # frontend does not end up with a truthiness check on a number (DEC-03).
@@ -838,7 +855,11 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
 
     # --- Embedding Model Change Consent & Re-embedding (DEC-06 AC S3) ---
 
-    @app.post("/api/v1/workspace/{workspace_id}/reembed")
+    @app.post(
+        "/api/v1/workspace/{workspace_id}/reembed",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=ApiResponse[TaskAcceptedRes],
+    )
     def reembed_workspace_endpoint(workspace_id: str, consent_model: str, consent_dim: int):
         """
         User consent to drop the workspace's vector collection and re-analyze all files with

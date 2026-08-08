@@ -1,7 +1,7 @@
 """
 Application data directory resolution (SRS §6.2 / DEC-06).
 
-Single source of truth for where CorpBrain writes user data on Windows:
+Single source of truth for where CorpBrain writes user data. On the shipped Windows target:
 
     %LocalAppData%\\CorpBrain\\
         corpbrain_meta.db     <- SQLite metadata (DEC-05)
@@ -13,8 +13,9 @@ scan but breaks ChromaDB — its bundled sqlite3 and Rust filesystem layer do no
 understand the extended-length syntax and fail with an opaque error.
 """
 
-import os
 from pathlib import Path
+
+from src.backend.utils.platform_compat import get_local_app_data_dir
 
 APP_DIR_NAME = "CorpBrain"
 VECTORS_DIR_NAME = "vectors"
@@ -27,9 +28,12 @@ def get_app_data_dir(create: bool = True) -> Path:
 
     LOCALAPPDATA is read at call time rather than import time so tests can redirect it
     with ``monkeypatch.setenv`` without needing a module reload.
+
+    On a non-Windows development host this resolves to that platform's equivalent
+    (``~/Library/Application Support`` on macOS) — see ``platform_compat``. The shipped
+    Windows exe is unaffected.
     """
-    local_app_data = os.environ.get("LOCALAPPDATA", os.path.expanduser("~\\AppData\\Local"))
-    base_dir = Path(local_app_data) / APP_DIR_NAME
+    base_dir = get_local_app_data_dir() / APP_DIR_NAME
     if create:
         base_dir.mkdir(parents=True, exist_ok=True)
     return base_dir
