@@ -176,3 +176,44 @@ def test_scenario_4_incremental_reanalysis_queue_processing(wa_setup):
     conn = db_mgr.get_connection()
     status = conn.cursor().execute(f"SELECT parse_status FROM File_Meta WHERE file_id = '{f1_id}';").fetchone()[0]
     assert status == "parsed"
+
+
+def test_issue_84_watcher_registers_new_file_with_uuid(wa_setup):
+    """
+    Regression test for issue #84: watcher must use str(uuid.uuid4()) for file_id, not
+    f"file_{timestamp}". The latter breaks deeplink anchors (which expect 36-char UUID) and
+    violates DEC-11.
+    """
+    watcher, db_mgr, file_repo, ws_id, tmpdir, f1, f1_id = wa_setup
+
+    # Create a new file that the watcher has never seen (scanner didn't pick it up).
+    new_file = os.path.join(tmpdir, "watcher_new_file.txt")
+    with open(new_file, "w", encoding="utf-8") as f:
+        f.write("New file content")
+
+    # Enqueue as a 'created' event — the watcher will register it in File_Meta.
+    watcher.enqueue_file_event(ws_id, None, "created", new_file)
+    result = watcher.process_next_queued_item()
+
+    assert result["status"] == "processed"
+    new_file_id = result["file_id"]
+
+    # AC 1: file_id is a 36-char hyphenated lowercase UUID (DEC-11).
+    import re
+    uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    assert re.match(uuid_pattern, new_file_id), f"file_id '{new_file_id}' is not a valid UUID"
+
+    # AC 2: deeplink anchor pattern can match it (issue #84 impact 1).
+    # DeepLinkService.DEEPLINK_PATTERN is r"\[\[file_id:([0-9a-fA-F\-]{36})\]\]".
+    # We'll test the extraction part: 36 chars, contains hyphens, hex+hyphens.
+    assert len(new_file_id) == 36
+    assert "-" in new_file_id
+    # A timestamp-based id like "file_1754..." would fail both checks.
+
+    # AC 3: the file is actually in File_Meta with that UUID.
+    conn = db_mgr.get_connection()
+    row = conn.cursor().execute(
+        "SELECT file_id, file_name FROM File_Meta WHERE file_id = ?;", (new_file_id,)
+    ).fetchone()
+    assert row is not None
+    assert row["file_name"] == "watcher_new_file.txt"
