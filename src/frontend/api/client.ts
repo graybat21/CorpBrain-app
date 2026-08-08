@@ -44,6 +44,7 @@ import type {
   WorkspaceDeletedRes,
   WorkspaceItemRes,
   WorkspaceListRes,
+  WorkspaceWikiRes,
 } from './types.gen';
 
 /** What the pywebview host injects before the SPA loads (DEC-02). */
@@ -436,6 +437,23 @@ export function getDeepLinkStatus(
   return data<DeepLinkStatusRes>('GET', API_PATHS.GET_workspace_deeplink_status, {
     params: { workspace_id: workspaceId },
     query: { file_id: fileId },
+  });
+}
+
+// --- Wiki (ANA-QRY-01) ---
+
+/**
+ * Fetch all wiki tabs for a workspace (issue #7 / ANA-QRY-01).
+ *
+ * Each tab corresponds to one folder_1depth row in Wiki_Content. The frontend renders
+ * these as separate tabs in the wiki viewer (ANA-FE-02). Markdown content includes
+ * [[file_id:<UUID>]] anchors (DEC-08), which the frontend replaces with clickable badges.
+ *
+ * Depends on: ANA-CMD-03 (wiki generation) must have run first, otherwise tabs=[].
+ */
+export function getWorkspaceWiki(workspaceId: string): Promise<WorkspaceWikiRes> {
+  return data<WorkspaceWikiRes>('GET', API_PATHS.GET_workspace_wiki, {
+    params: { workspace_id: workspaceId },
   });
 }
 
