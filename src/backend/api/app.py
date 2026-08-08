@@ -35,10 +35,12 @@ from src.backend.api.dtos import (
     WatcherConfigReq,
     WatcherConfigRes,
     WatcherStatusRes,
+    WikiTabRes,
     WorkspaceCreateReq,
     WorkspaceDeletedRes,
     WorkspaceItemRes,
     WorkspaceListRes,
+    WorkspaceWikiRes,
 )
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
@@ -889,5 +891,23 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
 
         task = app.state.task_runner.submit("reembed", reembed_body, workspace_id=workspace_id, total_count=0)
         return _accepted(task)
+
+    # --- Wiki Query Endpoint (ANA-QRY-01) ---
+
+    @app.get("/api/v1/workspace/{workspace_id}/wiki", response_model=ApiResponse[WorkspaceWikiRes])
+    def get_workspace_wiki_endpoint(workspace_id: str):
+        """
+        Return all wiki tabs for a workspace (issue #7 / ANA-QRY-01).
+
+        Each tab corresponds to one folder_1depth row in Wiki_Content. The frontend renders
+        these as separate tabs in the wiki viewer (ANA-FE-02). Markdown content includes
+        [[file_id:<UUID>]] anchors (DEC-08), which the frontend replaces with clickable badges.
+
+        Depends on: ANA-CMD-03 (wiki generation) must have run first, otherwise tabs=[].
+        """
+        from src.backend.services.query_services import WikiQueryService
+        svc = WikiQueryService(db_mgr)
+        tabs = [WikiTabRes(**t) for t in svc.get_workspace_wiki(workspace_id)]
+        return ApiResponse.success(WorkspaceWikiRes(workspace_id=workspace_id, tabs=tabs))
 
     return app
