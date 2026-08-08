@@ -19,7 +19,7 @@ def test_scan_limit_reached_exception():
 
         ws_dir = os.path.join(tmpdir, "ws_limit")
         os.makedirs(ws_dir)
-        ws = ws_repo.create("Limit WS", ws_dir)
+        ws = ws_repo.create("Limit WS", [ws_dir])
 
         service = ScannerService(file_repo=file_repo)
         service.MAX_FILE_LIMIT = 3

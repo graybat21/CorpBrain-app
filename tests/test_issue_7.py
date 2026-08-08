@@ -11,6 +11,7 @@ import uuid
 
 from src.backend.db import DatabaseManager
 from src.backend.services.query_services import WikiQueryService
+from tests.fakes import insert_workspace
 
 
 def test_empty_workspace_returns_empty_tabs():
@@ -20,10 +21,7 @@ def test_empty_workspace_returns_empty_tabs():
         try:
             ws_id = str(uuid.uuid4())
             conn = db_mgr.get_connection()
-            conn.execute(
-                "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
-                (ws_id, "test-ws", tmpdir)
-            )
+            insert_workspace(conn, ws_id, "test-ws", tmpdir)
 
             svc = WikiQueryService(db_mgr)
             tabs = svc.get_workspace_wiki(ws_id)
@@ -40,10 +38,7 @@ def test_multiple_tabs_ordered_by_folder_1depth():
         try:
             ws_id = str(uuid.uuid4())
             conn = db_mgr.get_connection()
-            conn.execute(
-                "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
-                (ws_id, "test-ws", tmpdir)
-            )
+            insert_workspace(conn, ws_id, "test-ws", tmpdir)
 
             # Insert in reverse order to test ORDER BY.
             wiki_02 = str(uuid.uuid4())
@@ -89,10 +84,7 @@ def test_markdown_contains_file_id_anchors_not_paths():
         try:
             ws_id = str(uuid.uuid4())
             conn = db_mgr.get_connection()
-            conn.execute(
-                "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
-                (ws_id, "test-ws", tmpdir)
-            )
+            insert_workspace(conn, ws_id, "test-ws", tmpdir)
 
             file_id = str(uuid.uuid4())
             wiki_id = str(uuid.uuid4())

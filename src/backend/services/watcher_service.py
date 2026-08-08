@@ -5,13 +5,14 @@ import queue
 import threading
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence, Union
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
+from src.backend.repositories.workspace_repository import WorkspaceRepository
 from src.backend.services.vector_service import DeepAnalysisService
 
 logger = logging.getLogger("CorpBrain.WatcherService")
@@ -123,11 +124,16 @@ class WatcherService:
         self,
         db_mgr: DatabaseManager,
         file_repo: FileRepository,
-        deep_analysis_service: Optional[DeepAnalysisService] = None
+        deep_analysis_service: Optional[DeepAnalysisService] = None,
+        workspace_repo: Optional[WorkspaceRepository] = None,
     ):
         self.db_mgr = db_mgr
         self.file_repo = file_repo
         self.deep_analysis_service = deep_analysis_service or DeepAnalysisService(db_mgr)
+        # Root lookup goes through the Repository, not a SELECT here (DEC-05: SQL lives only in
+        # Repositories). Defaulted rather than required so the existing construction sites and
+        # tests keep working.
+        self.workspace_repo = workspace_repo or WorkspaceRepository(db_mgr)
 
         self.suppress_events = False
         self.queue: queue.Queue = queue.Queue()
@@ -179,25 +185,53 @@ class WatcherService:
 
         # Dynamically adjust observer status
         if is_enabled:
-            ws_meta = conn.cursor().execute("SELECT root_path FROM Workspace_Meta WHERE workspace_id = ?;", (workspace_id,)).fetchone()
-            if ws_meta and os.path.exists(ws_meta["root_path"]):
-                self.start_observing(workspace_id, ws_meta["root_path"], debounce_ms=debounce_ms)
+            # Every merged root gets watched (issue #105). Previously this read the single
+            # `Workspace_Meta.root_path` column, so changes in folders 2..N raised no event.
+            roots = self.workspace_repo.list_roots(workspace_id)
+            if roots:
+                self.start_observing(workspace_id, roots, debounce_ms=debounce_ms)
         else:
             self.stop_observing(workspace_id)
 
         return self.get_config(workspace_id)
 
-    def start_observing(self, workspace_id: str, root_path: str, debounce_ms: int = 500):
-        """Starts watchdog Observer for workspace directory (WA-CMD-02)."""
+    def start_observing(
+        self,
+        workspace_id: str,
+        root_paths: Union[str, Sequence[str]],
+        debounce_ms: int = 500,
+    ):
+        """
+        Starts a watchdog Observer covering every root folder of the workspace (WA-CMD-02).
+
+        One Observer with several scheduled watches, not one Observer per root: `_observers` is
+        keyed by workspace_id, so a second entry would evict the first and leave its thread
+        running unstopped.
+        """
         if workspace_id in self._observers:
             self.stop_observing(workspace_id)
 
+        roots = [root_paths] if isinstance(root_paths, str) else list(root_paths)
         handler = CorpBrainWatcherHandler(self, workspace_id, debounce_ms=debounce_ms)
         observer = Observer()
-        observer.schedule(handler, root_path, recursive=True)
+
+        scheduled = []
+        for root_path in roots:
+            if not os.path.exists(root_path):
+                logger.warning(f"[WatcherService] Root path absent, not watched: '{root_path}'")
+                continue
+            observer.schedule(handler, root_path, recursive=True)
+            scheduled.append(root_path)
+
+        if not scheduled:
+            # Starting an Observer with zero watches would leave a live thread that can never
+            # emit an event, and `_observers` would claim the workspace is being watched.
+            logger.warning(f"[WatcherService] No watchable root for workspace {workspace_id}; observer not started")
+            return
+
         observer.start()
         self._observers[workspace_id] = observer
-        logger.info(f"[WatcherService] Started observer for workspace {workspace_id} on {root_path}")
+        logger.info(f"[WatcherService] Started observer for workspace {workspace_id} on {scheduled}")
 
     def stop_observing(self, workspace_id: str):
         """Stops watchdog Observer for workspace."""

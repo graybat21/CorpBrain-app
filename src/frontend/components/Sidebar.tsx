@@ -68,8 +68,19 @@ export const Sidebar: React.FC = () => {
                         <p className="text-xs font-medium text-slate-200 truncate">
                           {ws.workspace_name}
                         </p>
-                        <p className="text-[10px] text-slate-400 font-mono truncate">
-                          {ws.root_path}
+                        {/* Issue #105: a workspace merges several folders. Showing only
+                            root_paths[0] would repeat the bug this issue fixed at the UI
+                            layer — the user could not tell a 1-folder workspace from a
+                            3-folder one. The full list is in the tooltip; the line stays
+                            one row tall so the sidebar item height is unchanged. */}
+                        <p
+                          className="text-[10px] text-slate-400 font-mono truncate"
+                          title={ws.root_paths.join('\n')}
+                        >
+                          {ws.root_paths[0] ?? '(폴더 없음)'}
+                          {ws.root_paths.length > 1 && (
+                            <span className="text-slate-500"> +{ws.root_paths.length - 1}</span>
+                          )}
                         </p>
                       </div>
                     </div>

@@ -21,7 +21,9 @@ from fastapi.testclient import TestClient
 from src.backend.api.app import create_app
 from src.backend.db import DatabaseManager
 from src.backend.repositories.task_repository import TaskRepository
+from src.backend.repositories.workspace_repository import WorkspaceRepository
 from src.backend.services.task_service import TaskQueryService, TaskRunner
+from tests.fakes import insert_workspace
 from tests.task_polling import poll_until_done
 
 MIGRATIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "migrations")
@@ -325,10 +327,7 @@ def test_find_active_is_scoped_per_workspace_and_type(temp_env):
     with db_mgr.transaction() as tx:
         # root_path carries a UNIQUE constraint, so the two workspaces need distinct roots.
         for ws_id in (ws_a, ws_b):
-            tx.execute(
-                "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
-                (ws_id, f"WS {ws_id[:4]}", f"C:\\Nowhere\\{ws_id}"),
-            )
+            insert_workspace(tx, ws_id, f"WS {ws_id[:4]}", f"C:\\Nowhere\\{ws_id}")
 
     task = task_repo.create("scan", workspace_id=ws_a)
     assert task_repo.find_active(ws_a, "scan")["task_id"] == task["task_id"]
@@ -600,6 +599,7 @@ def test_v002_upgrades_an_existing_v001_database_without_data_loss():
         shutil.copy(os.path.join(MIGRATIONS_DIR, "v001_initial_schema.sql"), v001_only)
 
         old = DatabaseManager(db_path=db_path, migrations_dir=v001_only)
+        legacy_ws = str(uuid.uuid4())
         try:
             conn = old.get_connection()
             assert conn.execute("PRAGMA user_version;").fetchone()[0] == 1
@@ -609,19 +609,40 @@ def test_v002_upgrades_an_existing_v001_database_without_data_loss():
                     "INSERT INTO Async_Task (task_id, task_type, status, processed_count) VALUES (?, ?, ?, ?);",
                     ("legacy-task", "scan", "completed", 9),
                 )
+                # A v001 workspace stores its folder in the since-dropped
+                # Workspace_Meta.root_path column (issue #105 AC S3).
+                tx.execute(
+                    "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
+                    (legacy_ws, "레거시 워크스페이스", "/legacy/alpha"),
+                )
         finally:
             old.close()
 
         upgraded = DatabaseManager(db_path=db_path, migrations_dir=MIGRATIONS_DIR)
         try:
             conn = upgraded.get_connection()
-            # v003 adds Rename_History.status (issue #90), so the upgraded DB is now at version 3.
-            assert conn.execute("PRAGMA user_version;").fetchone()[0] == 3
+            # Derived from the migrations directory, not a literal: this assertion used to be
+            # bumped by hand on every new migration, which makes it a chore rather than a check.
+            latest = max(
+                int(f.split("_")[0].lstrip("v"))
+                for f in os.listdir(MIGRATIONS_DIR)
+                if f.startswith("v") and f.endswith(".sql")
+            )
+            assert conn.execute("PRAGMA user_version;").fetchone()[0] == latest
             assert "result_json" in [r[1] for r in conn.execute("PRAGMA table_info(Async_Task);")]
             row = TaskRepository(upgraded).get("legacy-task")
             assert row["processed_count"] == 9
             assert row["status"] == "completed"
             assert row["result_json"] is None
+
+            # issue #105 AC S3: the legacy root survived the rebuild of Workspace_Meta, and the
+            # workspace row itself was not dropped along with the column.
+            ws_repo = WorkspaceRepository(upgraded)
+            assert ws_repo.list_roots(legacy_ws) == ["/legacy/alpha"]
+            assert ws_repo.get_by_id(legacy_ws)["workspace_name"] == "레거시 워크스페이스"
+            # The FK survived the table rebuild; without it, deleting a workspace would strand
+            # its children instead of cascading (DEC-05).
+            assert conn.execute("PRAGMA foreign_key_check;").fetchall() == []
         finally:
             upgraded.close()
 

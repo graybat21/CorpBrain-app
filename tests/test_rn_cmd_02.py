@@ -21,7 +21,7 @@ def rn_setup():
         file_repo = FileRepository(db_mgr)
         scanner = ScannerService(file_repo)
 
-        ws_res = ws_repo.create("Rename Test WS", tmpdir)
+        ws_res = ws_repo.create("Rename Test WS", [tmpdir])
         ws_id = ws_res["workspace_id"]
 
         f1 = os.path.join(tmpdir, "original_doc1.txt")

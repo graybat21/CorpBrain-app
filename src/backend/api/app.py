@@ -396,10 +396,19 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
                 content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
             )
 
-        root_path = ws["root_path"]
+        # Every merged root, not just the first (issue #105). Reading `ws["root_path"]` here is
+        # what dropped folders 2..N from the scan with no error.
+        root_paths = ws["root_paths"]
+        if not root_paths:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=ApiResponse[None]
+                .fail("VALIDATION_FAILED", f"Workspace {workspace_id} has no root folders")
+                .model_dump(),
+            )
 
         def body(ctx):
-            records, limit_reached = app.state.scanner_service.scan_workspace(workspace_id, root_path)
+            records, limit_reached = app.state.scanner_service.scan_workspace(workspace_id, root_paths)
             ctx.set_total(len(records))
             ctx.advance(len(records))
             if limit_reached:

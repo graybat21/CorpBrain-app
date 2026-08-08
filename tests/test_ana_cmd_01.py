@@ -34,7 +34,7 @@ def test_fast_analysis_service_db_update():
         ws_repo = WorkspaceRepository(db_mgr)
         file_repo = FileRepository(db_mgr)
 
-        ws = ws_repo.create("Ana WS", tmpdir)
+        ws = ws_repo.create("Ana WS", [tmpdir])
         ws_id = ws["workspace_id"]
 
         records = [

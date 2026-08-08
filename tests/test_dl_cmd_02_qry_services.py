@@ -25,7 +25,7 @@ def qry_setup():
         ws_repo = WorkspaceRepository(db_mgr)
         file_repo = FileRepository(db_mgr)
 
-        ws_res = ws_repo.create("Query Test WS", tmpdir)
+        ws_res = ws_repo.create("Query Test WS", [tmpdir])
         ws_id = ws_res["workspace_id"]
 
         # Create a real temp file for path existence tests

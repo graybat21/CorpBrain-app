@@ -19,6 +19,7 @@ import uuid
 
 from src.backend.db import DatabaseManager
 from src.backend.services.llm_resilience_service import LLMResilienceService
+from tests.fakes import insert_workspace
 
 
 def test_partial_failure_returns_completed_with_failed_list():
@@ -68,10 +69,7 @@ def test_empty_list_early_return_matches_batch_schema():
 
             ws_id = str(uuid.uuid4())
             conn = db_mgr.get_connection()
-            conn.execute(
-                "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
-                (ws_id, "test", tmpdir)
-            )
+            insert_workspace(conn, ws_id, "test", tmpdir)
 
             v_db = VectorDBManager(
                 workspace_id=ws_id,

@@ -20,7 +20,7 @@ def scanner_setup():
 
         ws_dir = os.path.join(tmpdir, "test_ws")
         os.makedirs(ws_dir)
-        ws = ws_repo.create("Scan WS", ws_dir)
+        ws = ws_repo.create("Scan WS", [ws_dir])
 
         service = ScannerService(file_repo=file_repo)
         yield service, file_repo, ws["workspace_id"], ws_dir
