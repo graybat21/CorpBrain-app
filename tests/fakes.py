@@ -9,8 +9,12 @@ a live Ollama returns 768 floats — is covered by the opt-in `@pytest.mark.olla
 """
 
 import hashlib
+import shutil
 import struct
+import tempfile
+import time
 import uuid
+from contextlib import contextmanager
 from typing import Any, Dict, List
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings, Space
@@ -114,3 +118,42 @@ def insert_workspace(conn, workspace_id: str, name: str, *root_paths: str) -> No
                VALUES (?, ?, ?, ?);""",
             (str(uuid.uuid4()), workspace_id, root_path, order),
         )
+
+
+@contextmanager
+def chroma_temp_dir():
+    """
+    A temp directory that tolerates Windows releasing a Chroma file handle late (issue #110).
+
+    `TemporaryDirectory` deletes on `__exit__` with no retry. On Windows the CI job failed
+    intermittently with `PermissionError [WinError 32]` on `chroma.sqlite3`, followed by
+    `NotADirectoryError [WinError 267]` from `shutil.rmtree`'s own error handler — even though
+    `VectorDBManager.close()` had already run and the test body itself passed.
+
+    The cause is not a missing `close()`: Chroma's Rust/SQLite layer can drop the OS handle a
+    moment after `client.close()` returns, and Windows refuses to unlink a file with any open
+    handle. That is a race, so the fix is a bounded retry rather than another close call. On
+    POSIX this loop never iterates — unlinking an open file is legal there, which is exactly
+    why the failure only ever appeared on `windows-latest`.
+
+    Last resort is `ignore_errors=True`: a leaked temp directory is the OS's problem at
+    reboot, whereas a teardown exception fails a green test run and — worse — buries the real
+    assertion error when the body *did* fail.
+    """
+    tmpdir = tempfile.mkdtemp()
+    try:
+        yield tmpdir
+    finally:
+        # `break`, never `return`: a `return` inside `finally` discards an in-flight exception,
+        # which would silently swallow the very assertion failure this helper exists to keep
+        # visible (ruff B012 flags it, and it is right to).
+        for attempt in range(10):
+            try:
+                shutil.rmtree(tmpdir)
+                break
+            except (PermissionError, NotADirectoryError, OSError):
+                if attempt == 9:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    break
+                # Short, growing sleep: the handle is normally gone within a few tens of ms.
+                time.sleep(0.05 * (attempt + 1))

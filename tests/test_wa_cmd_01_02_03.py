@@ -1,5 +1,4 @@
 import os
-import tempfile
 import time
 
 import pytest
@@ -11,12 +10,14 @@ from src.backend.repositories.workspace_repository import WorkspaceRepository
 from src.backend.services.scanner_service import ScannerService
 from src.backend.services.vector_service import DeepAnalysisService, VectorDBManager
 from src.backend.services.watcher_service import CorpBrainWatcherHandler, WatcherService
-from tests.fakes import FakeEmbeddingFunction
+from tests.fakes import FakeEmbeddingFunction, chroma_temp_dir
 
 
 @pytest.fixture
 def wa_setup():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # chroma_temp_dir, not TemporaryDirectory: this test opens a real Chroma client, and
+    # Windows can hold chroma.sqlite3 open a moment past close() (issue #110).
+    with chroma_temp_dir() as tmpdir:
         db_path = os.path.join(tmpdir, "wa_test.db")
         migrations_dir = os.path.join(os.path.dirname(__file__), "..", "migrations")
         db_mgr = DatabaseManager(db_path=db_path, migrations_dir=migrations_dir)

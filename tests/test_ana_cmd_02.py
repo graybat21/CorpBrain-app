@@ -1,5 +1,4 @@
 import os
-import tempfile
 
 import pytest
 
@@ -8,12 +7,14 @@ from src.backend.repositories.file_repository import FileRepository
 from src.backend.repositories.workspace_repository import WorkspaceRepository
 from src.backend.services.vector_service import DeepAnalysisService, VectorDBManager
 from src.backend.services.workspace_service import WorkspaceService
-from tests.fakes import FakeEmbeddingFunction
+from tests.fakes import FakeEmbeddingFunction, chroma_temp_dir
 
 
 @pytest.fixture
 def db_setup():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # chroma_temp_dir, not TemporaryDirectory: this test opens a real Chroma client, and
+    # Windows can hold chroma.sqlite3 open a moment past close() (issue #110).
+    with chroma_temp_dir() as tmpdir:
         db_path = os.path.join(tmpdir, "ana2_test.db")
         migrations_dir = os.path.join(os.path.dirname(__file__), "..", "migrations")
         db_mgr = DatabaseManager(db_path=db_path, migrations_dir=migrations_dir)

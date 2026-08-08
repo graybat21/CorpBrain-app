@@ -14,7 +14,7 @@ import os
 import tempfile
 
 from src.backend.db import DatabaseManager
-from tests.fakes import insert_workspace
+from tests.fakes import chroma_temp_dir, insert_workspace
 
 
 def test_wiki_generate_task_type_registered():
@@ -72,7 +72,9 @@ def test_vector_search_supports_folder_filter():
     """
     VectorDBManager.search() now accepts folder_1depth parameter (AC S2: wiki isolation).
     """
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # chroma_temp_dir, not TemporaryDirectory: this test opens a real Chroma client, and
+    # Windows can hold chroma.sqlite3 open a moment past close() (issue #110).
+    with chroma_temp_dir() as tmpdir:
         db_path = os.path.join(tmpdir, "issue3_vector.db")
         db_mgr = DatabaseManager(db_path=db_path)
         try:
