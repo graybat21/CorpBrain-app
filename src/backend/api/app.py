@@ -614,6 +614,32 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
 
         return _submit_once("rename_undo", workspace_id, body)
 
+    # --- Wiki Generation Endpoint (ANA-CMD-03) ---
+
+    @app.post("/api/v1/workspace/{workspace_id}/wiki/generate", status_code=status.HTTP_202_ACCEPTED)
+    def generate_wiki_endpoint(workspace_id: str):
+        """
+        Generate wiki markdown documents for all folders in a workspace (ANA-CMD-03).
+
+        DEC-04: Returns 202 + task_id. Frontend polls for progress.
+        """
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+
+        def body(ctx):
+            from src.backend.services.wiki_service import WikiGenerationService
+            svc = WikiGenerationService(db_mgr)
+            result = svc.generate_wiki_for_workspace(workspace_id)
+            ctx.set_total(result["succeeded_count"] + len(result["failed"]))
+            ctx.advance(result["succeeded_count"] + len(result["failed"]))
+            return result
+
+        return _submit_once("wiki_generate", workspace_id, body)
+
     def _watcher_config_res(cfg: Dict[str, Any]) -> WatcherConfigRes:
         # is_enabled is stored as SQLite INTEGER 0/1; the DTO exposes a real bool so the
         # frontend does not end up with a truthiness check on a number (DEC-03).

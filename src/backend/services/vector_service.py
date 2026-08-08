@@ -373,6 +373,7 @@ class VectorDBManager:
         query_text: str,
         n_results: int = 10,
         live_file_ids: Optional[Iterable[str]] = None,
+        folder_1depth: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Cosine similarity search with lazy orphan deletion (DEC-09).
@@ -385,13 +386,22 @@ class VectorDBManager:
         empty set. Interpreting "caller didn't tell me" as "nothing is alive" would delete the
         entire collection on the first search from an un-updated call site.
 
+        ``folder_1depth`` optionally filters results to a specific folder (AC S2: wiki isolation).
+
         The set is injected rather than queried here because DEC-05 keeps SQL inside
         Repositories — see ``FileRepository.select_existing_file_ids``.
         """
         collection = self._get_collection()
+
+        # Build where clause for folder filter
+        where_clause = None
+        if folder_1depth is not None:
+            where_clause = {"folder_1depth": folder_1depth}
+
         result = collection.query(
             query_texts=[query_text],
             n_results=n_results,
+            where=where_clause,
             include=["documents", "metadatas", "distances"],
         )
 
