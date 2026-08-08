@@ -1,0 +1,95 @@
+name: CI
+
+# Blocks the merge on the gates CLAUDE.md §5 already calls the Definition of Done. Until this
+# existed, every gate was a local command a contributor could forget to run, and three
+# regressions reached main that way: two routes without a `response_model` (DEC-02 makes the
+# generated OpenAPI schema the contract SSOT, so an untyped route emits nothing to generate
+# from), a stale `types.gen.ts`, and — the reason DEC-15's banned-api rule was written in the
+# first place — a direct `urllib.request` import outside NetworkGuard.
+#
+# windows-latest is the authoritative job: Windows is the only shipped target (DEC-01) and the
+# DPAPI (DEC-12), `os.startfile` (DEC-08) and `%LocalAppData%` (DEC-05/06) paths only execute
+# there. macos-latest runs because development happens on macOS — it catches a change that
+# breaks the dev host without touching shipped behaviour, which is otherwise invisible until
+# someone pulls.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A force-push mid-review shouldn't leave a stale run burning minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Don't cancel the Windows job because macOS failed, or vice versa: when a change breaks
+      # one platform the most useful information is whether the other still passes.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            lock: requirements.lock.windows.txt
+          - os: macos-latest
+            lock: requirements.lock.macos.txt
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 3.10 is the floor CLAUDE.md §6 declares. Pinning the minor version here rather than
+      # tracking "latest" keeps CI honest about that floor — a 3.12-only syntax slip would
+      # otherwise pass CI and fail for a contributor on 3.10.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: ${{ matrix.lock }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r ${{ matrix.lock }}
+
+      # Catches a committed merge-conflict marker or any other syntax error before the test
+      # run, where it would otherwise surface as an unrelated-looking collection error.
+      - name: Compile all sources
+        run: python -m compileall -q src scripts tests
+
+      # Carries the DEC-15 banned-api rule (ruff.toml) — this step is what makes it merge-blocking.
+      - name: Lint
+        run: ruff check .
+
+      - name: Tests
+        run: python -m pytest -q
+
+  frontend:
+    name: frontend
+    # The React bundle is a build-time artifact embedded with PyInstaller `--add-data`; nothing
+    # about producing it is platform-specific, so one runner is enough. Node is a build-time
+    # toolchain only and never enters the shipped exe (DEC-01).
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Build
+        run: npx vite build

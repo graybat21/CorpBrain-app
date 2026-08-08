@@ -21,10 +21,10 @@ ignore = [
 # DEC-15: NetworkGuard is the single outbound egress gate. No other module may
 # import a network library. `network_guard.py` is exempted below.
 #
-# Note: this is a LOCAL lint rule. DEC-15 also calls for a CI rule that blocks the
-# merge — that lives in .github/workflows/ and is tracked separately as issue #85.
-# It also cannot constrain third-party packages (see the chromadb note in
-# requirements.txt); tests/test_db_002.py adds an AST check as defence in depth.
+# DEC-15 requires this to BLOCK THE MERGE, which the `Lint` step of
+# .github/workflows/ci.yml now does (issue #85). It cannot constrain third-party
+# packages (see the chromadb note in requirements.txt); tests/test_db_002.py adds
+# an AST check as defence in depth.
 "requests".msg = "DEC-15: route outbound HTTP through src.backend.network_guard.NetworkGuard."
 "socket".msg = "DEC-15: raw sockets bypass the egress whitelist. Use NetworkGuard."
 "urllib.request".msg = "DEC-15: route outbound HTTP through NetworkGuard."

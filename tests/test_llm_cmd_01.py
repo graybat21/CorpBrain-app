@@ -1,10 +1,17 @@
+import base64
 import os
+import sys
 import tempfile
 
 import pytest
 
 from src.backend.config_manager import ConfigManager
 from src.backend.db import DatabaseManager
+
+# DEC-12 pins API key storage to Windows DPAPI, which has no cross-platform equivalent, so
+# the storage scenarios can only be asserted on Windows (what CI runs). The no-DPAPI host
+# behaviour is covered in tests/test_inf_cmd_02.py.
+windows_only = pytest.mark.skipif(sys.platform != "win32", reason="DPAPI is Windows-only (DEC-12)")
 
 
 @pytest.fixture
@@ -27,6 +34,7 @@ def test_scenario_1_default_config_initialization(config_mgr):
     assert cm.get("local_embedding_model") == "nomic-embed-text"
 
 
+@windows_only
 def test_scenario_2_dpapi_api_key_encryption(config_mgr):
     cm, db_mgr, db_path = config_mgr
     raw_key = "sk-ant-api03-test-secret-key-12345"
@@ -43,6 +51,7 @@ def test_scenario_2_dpapi_api_key_encryption(config_mgr):
     assert decrypted_key == raw_key
 
 
+@windows_only
 def test_scenario_3_plaintext_key_absent_in_db(config_mgr):
     cm, db_mgr, db_path = config_mgr
     raw_key = "sk-ant-api03-very-secret-string-9999"
@@ -59,6 +68,12 @@ def test_scenario_3_plaintext_key_absent_in_db(config_mgr):
     assert stored_val != raw_key
     assert raw_key not in stored_val
     assert len(stored_val) > 20
+
+    # "differs from the plaintext" is too weak on its own: the removed `MOCK_ENC:<base64>`
+    # fallback satisfied every assertion above while being trivially reversible. Decoding the
+    # stored blob must NOT yield the key back — that is the property DEC-12 actually requires.
+    decoded = base64.b64decode(stored_val.encode("utf-8"))
+    assert raw_key.encode("utf-8") not in decoded
 
 
 def test_scenario_4_mode_change_and_price_edit(config_mgr):

@@ -1,7 +1,40 @@
+"""
+API key encryption at rest (DEC-12).
+
+Windows DPAPI (``CryptProtectData`` / ``CryptUnprotectData`` via ``ctypes``) is the only
+sanctioned mechanism: it binds the ciphertext to the current user account, needs no master
+key, and adds no dependency.
+
+There is deliberately **no non-Windows implementation.** DPAPI has no cross-platform
+equivalent that satisfies DEC-12, and the previous fallback here returned
+``"MOCK_ENC:" + base64(plaintext)`` — reversible by anyone with the DB file, i.e. plaintext
+at rest, which is exactly what DEC-12 forbids ("never store the key in plaintext"). It was
+labelled "for unit tests" but nothing confined it to tests: ``ConfigManager.set_api_key``
+called it on any host, so a developer entering a real key on macOS wrote a recoverable key
+to disk.
+
+Off Windows, persistence raises ``SecretStorageUnavailableError``. A developer who needs to
+exercise Option A supplies the key through ``CORPBRAIN_ANTHROPIC_API_KEY``, which is read
+into memory at call time and never written anywhere — see ``ConfigManager.get_api_key``.
+"""
+
 import base64
 import sys
 
-if sys.platform == "win32":
+from src.backend.utils.platform_compat import IS_WINDOWS
+
+
+class SecretStorageUnavailableError(RuntimeError):
+    """
+    Raised when secret storage is requested on a host that has no DPAPI.
+
+    Distinct from a DPAPI *failure* (wrong account/PC), which DEC-12 requires to surface as a
+    re-entry prompt. This one means "this host can never store it", so the caller must not
+    offer re-entry — it would fail identically every time.
+    """
+
+
+if IS_WINDOWS:
     import ctypes
     from ctypes import wintypes
 
@@ -82,11 +115,14 @@ if sys.platform == "win32":
             ctypes.windll.kernel32.LocalFree(out_blob.pbData)
 
 else:
-    # Non-Windows fallback for unit tests
+    _UNAVAILABLE = (
+        f"API key storage requires Windows DPAPI (DEC-12) and this host is {sys.platform}. "
+        "Set CORPBRAIN_ANTHROPIC_API_KEY in the environment to exercise Option A during "
+        "development; the key is held in memory only and never written to the database."
+    )
+
     def encrypt_secret(plaintext: str) -> str:
-        return "MOCK_ENC:" + base64.b64encode(plaintext.encode("utf-8")).decode("utf-8")
+        raise SecretStorageUnavailableError(_UNAVAILABLE)
 
     def decrypt_secret(ciphertext_b64: str) -> str:
-        if ciphertext_b64.startswith("MOCK_ENC:"):
-            return base64.b64decode(ciphertext_b64[9:].encode("utf-8")).decode("utf-8")
-        return ciphertext_b64
+        raise SecretStorageUnavailableError(_UNAVAILABLE)

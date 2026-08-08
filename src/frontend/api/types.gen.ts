@@ -494,6 +494,7 @@ export const API_PATHS = {
   POST_workspace_deeplink_open: "/api/v1/workspace/{workspace_id}/deeplink/open",
   GET_workspace_deeplink_status: "/api/v1/workspace/{workspace_id}/deeplink/status",
   GET_workspace_file: "/api/v1/workspace/{workspace_id}/file",
+  POST_workspace_reembed: "/api/v1/workspace/{workspace_id}/reembed",
   POST_workspace_rename_apply: "/api/v1/workspace/{workspace_id}/rename/apply",
   GET_workspace_rename_diff: "/api/v1/workspace/{workspace_id}/rename/diff",
   POST_workspace_rename_diff: "/api/v1/workspace/{workspace_id}/rename/diff",
@@ -504,5 +505,6 @@ export const API_PATHS = {
   POST_workspace_watcher_config: "/api/v1/workspace/{workspace_id}/watcher/config",
   GET_workspace_watcher_status: "/api/v1/workspace/{workspace_id}/watcher/status",
   GET_workspace_wiki: "/api/v1/workspace/{workspace_id}/wiki",
+  POST_workspace_wiki_generate: "/api/v1/workspace/{workspace_id}/wiki/generate",
   GET_workspaces: "/api/v1/workspaces",
 } as const;

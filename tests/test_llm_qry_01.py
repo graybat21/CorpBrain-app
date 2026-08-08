@@ -1,11 +1,12 @@
 import os
+import sys
 import tempfile
 import urllib.error
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.backend.config_manager import ConfigManager
+from src.backend.config_manager import DEV_API_KEY_ENV, ConfigManager
 from src.backend.db import DatabaseManager
 from src.backend.network_guard import EgressBlockedError, NetworkGuard
 from src.backend.services.query_services import LlmQueryService
@@ -22,6 +23,21 @@ def llm_qry_setup():
         service = LlmQueryService(db_mgr)
         yield service, config_mgr, db_mgr
         db_mgr.close()
+
+
+def _configure_api_key(config_mgr, monkeypatch, key: str = "sk-ant-test-key-12345") -> None:
+    """
+    Put the config into "a key is available" state on whichever host is running.
+
+    These tests are about health-check *logic* (which flags and error codes come back), not
+    about how the key is stored — DEC-12 storage itself is covered in test_inf_cmd_02.py and
+    test_llm_cmd_01.py. On Windows the real DPAPI path runs; elsewhere the dev environment
+    variable supplies it, since `set_api_key` correctly refuses to persist without DPAPI.
+    """
+    if sys.platform == "win32":
+        config_mgr.set_api_key(key)
+    else:
+        monkeypatch.setenv(DEV_API_KEY_ENV, key)
 
 
 def _mock_tags_response(body: bytes):
@@ -48,9 +64,12 @@ def test_service_defaults_to_real_network_guard(llm_qry_setup):
     assert service.network_guard is NetworkGuard
 
 
-def test_scenario_1_option_a_health_check(llm_qry_setup):
+def test_scenario_1_option_a_health_check(llm_qry_setup, monkeypatch):
     service, config_mgr, db_mgr = llm_qry_setup
     config_mgr.set("llm_mode", "Option A")
+    # The dev-host fallback reads this env var, so a real key in the developer's shell would
+    # otherwise make the "not configured" half of this test pass for the wrong reason.
+    monkeypatch.delenv(DEV_API_KEY_ENV, raising=False)
 
     with patch("urllib.request.urlopen", return_value=_mock_tags_response(BOTH_MODELS)):
         # API key not set
@@ -61,7 +80,7 @@ def test_scenario_1_option_a_health_check(llm_qry_setup):
         assert res1["error_code"] == "API_KEY_NOT_CONFIGURED"
 
         # API key set
-        config_mgr.set_api_key("sk-ant-test-key-12345")
+        _configure_api_key(config_mgr, monkeypatch)
         res2 = service.check_health()
         assert res2["api_key_configured"] is True
         assert res2["status_ok"] is True
@@ -108,7 +127,7 @@ def test_scenario_4_option_b_all_ready(llm_qry_setup):
         assert res["error_code"] is None
 
 
-def test_scenario_5_option_a_needs_embedding_model(llm_qry_setup):
+def test_scenario_5_option_a_needs_embedding_model(llm_qry_setup, monkeypatch):
     """
     AC Scenario 3 (DEC-06 파급): Option A with a valid key but no local embedding model.
 
@@ -118,7 +137,7 @@ def test_scenario_5_option_a_needs_embedding_model(llm_qry_setup):
     """
     service, config_mgr, db_mgr = llm_qry_setup
     config_mgr.set("llm_mode", "Option A")
-    config_mgr.set_api_key("sk-ant-test-key-12345")
+    _configure_api_key(config_mgr, monkeypatch)
 
     with patch("urllib.request.urlopen", side_effect=DAEMON_DOWN):
         res = service.check_health()

@@ -4,9 +4,14 @@ import os
 from typing import Any, Dict, Optional
 
 from src.backend.db import DatabaseManager
+from src.backend.utils.platform_compat import IS_WINDOWS
 from src.backend.utils.security import decrypt_secret, encrypt_secret
 
 logger = logging.getLogger("CorpBrain.ConfigManager")
+
+#: Development-only escape hatch for a host without DPAPI (DEC-12). Read in memory at call
+#: time and never persisted. The shipped Windows exe never consults it.
+DEV_API_KEY_ENV = "CORPBRAIN_ANTHROPIC_API_KEY"
 
 
 class ConfigManager:
@@ -90,7 +95,13 @@ class ConfigManager:
             conn.execute(query, (key, val_str))
 
     def set_api_key(self, api_key: str):
-        """Encrypt API key using Windows DPAPI and store base64 blob (DEC-12)."""
+        """
+        Encrypt API key using Windows DPAPI and store base64 blob (DEC-12).
+
+        Raises ``SecretStorageUnavailableError`` on a host without DPAPI. Clearing the key
+        (empty input) is still allowed everywhere — it writes no secret, and refusing it
+        would leave a developer unable to remove a stored key.
+        """
         if not api_key:
             self.set("api_key_encrypted", "")
             return
@@ -101,10 +112,15 @@ class ConfigManager:
         """
         Decrypt API key in-memory using Windows DPAPI (DEC-12).
         Returns empty string if decryption fails (e.g. transferred to another PC/account).
+
+        On a non-Windows development host there is no DPAPI and nothing was ever persisted
+        (``set_api_key`` raises there), so the key comes from the environment instead. It is
+        returned to the caller and never written to the database — the same in-memory-only
+        lifetime DEC-12 requires of the decrypted value on Windows.
         """
         encrypted_blob = self.get("api_key_encrypted", "")
         if not encrypted_blob:
-            return ""
+            return os.environ.get(DEV_API_KEY_ENV, "") if not IS_WINDOWS else ""
         try:
             return decrypt_secret(encrypted_blob)
         except Exception as e:
@@ -112,9 +128,19 @@ class ConfigManager:
             return ""
 
     def is_api_key_configured(self) -> bool:
-        """Returns True if encrypted API key is present in DB (DEC-12)."""
+        """
+        Returns True if an API key is available for an Option A call (DEC-12).
+
+        Reports the *environment* key off Windows as well. Reporting only the DB column
+        there would make the settings screen say "미등록" while calls actually succeed, and
+        that mismatch is what sends someone hunting for a storage bug that does not exist.
+        """
         blob = self.get("api_key_encrypted", "")
-        return bool(blob and blob.strip())
+        if blob and blob.strip():
+            return True
+        if not IS_WINDOWS:
+            return bool(os.environ.get(DEV_API_KEY_ENV, "").strip())
+        return False
 
     def get_all(self) -> Dict[str, str]:
         """Get all config values excluding decrypted sensitive API key."""
