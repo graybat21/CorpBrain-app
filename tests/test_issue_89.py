@@ -14,12 +14,11 @@ Issue #89 reported that:
 """
 
 import os
-import tempfile
 import uuid
 
 from src.backend.db import DatabaseManager
 from src.backend.services.llm_resilience_service import LLMResilienceService
-from tests.fakes import insert_workspace
+from tests.fakes import chroma_temp_dir, insert_workspace
 
 
 def test_partial_failure_returns_completed_with_failed_list():
@@ -61,7 +60,9 @@ def test_empty_list_early_return_matches_batch_schema():
     """
     Issue #89 problem 2: empty-list early return must have the same schema as process_file_batch.
     """
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # chroma_temp_dir, not TemporaryDirectory: this test opens a real Chroma client, and
+    # Windows can hold chroma.sqlite3 open a moment past close() (issue #110).
+    with chroma_temp_dir() as tmpdir:
         db_mgr = DatabaseManager(db_path=os.path.join(tmpdir, "issue89.db"))
         try:
             from src.backend.services.vector_service import DeepAnalysisService, VectorDBManager

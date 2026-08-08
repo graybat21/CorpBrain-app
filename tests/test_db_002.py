@@ -29,7 +29,7 @@ from src.backend.services.vector_service import (
 from src.backend.services.workspace_service import WorkspaceService
 from src.backend.utils.app_paths import get_vectors_dir
 from src.backend.vector_settings import build_chroma_settings
-from tests.fakes import FakeEmbeddingFunction, RecordingGuard
+from tests.fakes import FakeEmbeddingFunction, RecordingGuard, chroma_temp_dir
 
 MIGRATIONS_DIR = os.path.join(os.path.dirname(__file__), "..", "migrations")
 
@@ -50,16 +50,26 @@ def _chunks(file_id: str, count: int, workspace_id: str = "ws-1", prefix: str = 
 
 @pytest.fixture
 def store():
-    """A real Chroma-backed manager over a temp dir, with a deterministic fake EF."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    """
+    A real Chroma-backed manager over a temp dir, with a deterministic fake EF.
+
+    Teardown goes through `chroma_temp_dir` rather than `TemporaryDirectory` directly, and
+    closes the manager in a `finally` — see that helper for why (issue #110).
+    """
+    with chroma_temp_dir() as tmpdir:
         persist_dir = os.path.join(tmpdir, "vectors")
         manager = VectorDBManager(
             workspace_id="1e2f3a4b-0000-4000-8000-000000000001",
             persist_dir=persist_dir,
             embedding_function=FakeEmbeddingFunction(),
         )
-        yield manager, persist_dir
-        manager.close()
+        try:
+            yield manager, persist_dir
+        finally:
+            # `finally`, not a trailing statement: a failing assertion in the test body would
+            # otherwise skip the close, and the WinError 32 from teardown then buries the real
+            # assertion error under a cleanup traceback (HANDOFF.md 함정 5).
+            manager.close()
 
 
 # --- AC S1: PersistentClient + per-workspace cosine collection ------------------------------
