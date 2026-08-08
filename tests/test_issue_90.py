@@ -26,6 +26,7 @@ import uuid
 from src.backend.db import DatabaseManager
 from src.backend.services.query_services import RenameQueryService
 from src.backend.services.rename_service import RenameService
+from tests.fakes import insert_workspace
 
 
 def test_status_column_exists_after_migration():
@@ -51,10 +52,7 @@ def test_generate_diff_persists_status_pending():
         try:
             ws_id = str(uuid.uuid4())
             conn = db_mgr.get_connection()
-            conn.execute(
-                "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
-                (ws_id, "test-ws", tmpdir)
-            )
+            insert_workspace(conn, ws_id, "test-ws", tmpdir)
             file_id = str(uuid.uuid4())
             file_path = os.path.join(tmpdir, "old_name.txt")
             with open(file_path, "w", encoding="utf-8") as f:
@@ -103,10 +101,7 @@ def test_get_pending_rename_diff_returns_correct_structure():
         try:
             ws_id = str(uuid.uuid4())
             conn = db_mgr.get_connection()
-            conn.execute(
-                "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
-                (ws_id, "test-ws", tmpdir)
-            )
+            insert_workspace(conn, ws_id, "test-ws", tmpdir)
             file_id = str(uuid.uuid4())
             file_path = os.path.join(tmpdir, "old.txt")
             with open(file_path, "w", encoding="utf-8") as f:
@@ -149,10 +144,7 @@ def test_apply_updates_status_to_applied():
         try:
             ws_id = str(uuid.uuid4())
             conn = db_mgr.get_connection()
-            conn.execute(
-                "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
-                (ws_id, "test-ws", tmpdir)
-            )
+            insert_workspace(conn, ws_id, "test-ws", tmpdir)
             file_id = str(uuid.uuid4())
             old_path = os.path.join(tmpdir, "old.txt")
             with open(old_path, "w", encoding="utf-8") as f:
@@ -194,10 +186,7 @@ def test_missing_file_shows_file_id_none_not_crash():
         try:
             ws_id = str(uuid.uuid4())
             conn = db_mgr.get_connection()
-            conn.execute(
-                "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
-                (ws_id, "test-ws", tmpdir)
-            )
+            insert_workspace(conn, ws_id, "test-ws", tmpdir)
 
             # Insert a Rename_History row referencing a path with no File_Meta row.
             import json

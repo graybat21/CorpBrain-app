@@ -453,7 +453,7 @@ export interface WorkspaceDeletedRes {
 export interface WorkspaceItemRes {
   workspace_id: string;
   workspace_name: string;
-  root_path: string;
+  root_paths: string[];
   created_at: string;
   updated_at: string;
 }

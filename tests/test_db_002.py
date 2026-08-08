@@ -411,7 +411,7 @@ def test_s5_drops_collection_before_sqlite_row(tmp_path):
     try:
         ws_repo = WorkspaceRepository(db_mgr)
         file_repo = FileRepository(db_mgr)
-        workspace = ws_repo.create("S5 WS", str(root))
+        workspace = ws_repo.create("S5 WS", [str(root)])
         workspace_id = workspace["workspace_id"]
 
         manager = VectorDBManager(
@@ -477,7 +477,7 @@ def test_s5_absent_collection_is_not_an_error(tmp_path):
     root.mkdir()
     try:
         ws_repo = WorkspaceRepository(db_mgr)
-        workspace_id = ws_repo.create("Empty WS", str(root))["workspace_id"]
+        workspace_id = ws_repo.create("Empty WS", [str(root)])["workspace_id"]
         manager = VectorDBManager(workspace_id=None, persist_dir=str(tmp_path / "vectors"))
         try:
             service = WorkspaceService(ws_repo, vector_store=manager)
@@ -533,7 +533,7 @@ def test_select_existing_file_ids_backs_the_lazy_delete(tmp_path):
     try:
         ws_repo = WorkspaceRepository(db_mgr)
         file_repo = FileRepository(db_mgr)
-        workspace_id = ws_repo.create("IDs WS", str(root))["workspace_id"]
+        workspace_id = ws_repo.create("IDs WS", [str(root)])["workspace_id"]
         file_repo.bulk_upsert([{
             "workspace_id": workspace_id,
             "file_id": "file-live",

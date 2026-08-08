@@ -14,6 +14,7 @@ import os
 import tempfile
 
 from src.backend.db import DatabaseManager
+from tests.fakes import insert_workspace
 
 
 def test_wiki_generate_task_type_registered():
@@ -81,10 +82,7 @@ def test_vector_search_supports_folder_filter():
             # Create a workspace
             conn = db_mgr.get_connection()
             ws_id = "test-ws-1"
-            conn.execute(
-                "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?)",
-                (ws_id, "Test", tmpdir)
-            )
+            insert_workspace(conn, ws_id, "Test", tmpdir)
             conn.commit()
 
             v_db = VectorDBManager(

@@ -19,7 +19,7 @@ def deeplink_setup():
         ws_repo = WorkspaceRepository(db_mgr)
         file_repo = FileRepository(db_mgr)
 
-        ws = ws_repo.create("DL WS", tmpdir)
+        ws = ws_repo.create("DL WS", [tmpdir])
         ws_id = ws["workspace_id"]
 
         f1_id = str(uuid.uuid4())

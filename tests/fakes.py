@@ -10,6 +10,7 @@ a live Ollama returns 768 floats — is covered by the opt-in `@pytest.mark.olla
 
 import hashlib
 import struct
+import uuid
 from typing import Any, Dict, List
 
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings, Space
@@ -88,3 +89,28 @@ class RecordingGuard:
     def post_json(self, purpose: str, url: str, payload: Dict[str, Any], timeout: float) -> Dict[str, Any]:
         self.calls.append({"purpose": purpose, "url": url, "payload": payload, "timeout": timeout})
         return {"embedding": [0.01] * self.dim}
+
+
+def insert_workspace(conn, workspace_id: str, name: str, *root_paths: str) -> None:
+    """
+    Insert a Workspace_Meta row plus its Workspace_Root children (issue #105).
+
+    Fixtures that build a workspace with raw SQL used to write a single
+    `Workspace_Meta.root_path` column. v004 moved roots into a child table, and a fixture that
+    inserts only the parent row produces a workspace whose scan finds nothing — which looks
+    like the bug #105 fixed rather than a fixture gap. Centralised here so the next schema
+    change touches one place instead of seventeen.
+
+    Prefer `WorkspaceRepository.create` where the test is not specifically exercising
+    pre-existing rows; this exists for fixtures that need a fixed workspace_id.
+    """
+    conn.execute(
+        "INSERT INTO Workspace_Meta (workspace_id, workspace_name) VALUES (?, ?);",
+        (workspace_id, name),
+    )
+    for order, root_path in enumerate(root_paths):
+        conn.execute(
+            """INSERT INTO Workspace_Root (root_id, workspace_id, root_path, sort_order)
+               VALUES (?, ?, ?, ?);""",
+            (str(uuid.uuid4()), workspace_id, root_path, order),
+        )

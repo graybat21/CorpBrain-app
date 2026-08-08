@@ -1,7 +1,7 @@
 import logging
 import os
 import uuid
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Sequence, Tuple, Union
 
 from src.backend.repositories.file_repository import FileRepository
 from src.backend.utils.file_utils import normalize_path, safe_file_access
@@ -31,60 +31,105 @@ class ScannerService:
         self.file_repo = file_repo
 
     @safe_file_access(default_return=([], False))
-    def scan_workspace(self, workspace_id: str, root_path: str, raise_on_limit: bool = False) -> Tuple[List[Dict[str, Any]], bool]:
+    def scan_workspace(
+        self,
+        workspace_id: str,
+        root_paths: Union[str, Sequence[str]],
+        raise_on_limit: bool = False,
+    ) -> Tuple[List[Dict[str, Any]], bool]:
         """
-        Recursively scan directory root_path for supported files,
-        excluding blacklisted folders, up to 10,000 files limit.
+        Recursively scan every root folder of a workspace for supported files,
+        excluding blacklisted folders, up to 10,000 files total.
         Returns (scanned_files_list, limit_reached_flag).
+
+        `root_paths` accepts a single path for the one-folder case, but the 10,000 limit is a
+        **workspace total** across all roots (issue #105, consistent with SCAN-CMD-02): the cap
+        exists to bound the work one scan does, and per-root budgets would let N folders index
+        N x 10,000 files.
         """
-        norm_root = normalize_path(root_path)
-        if not os.path.exists(norm_root):
-            return [], False
+        roots = [root_paths] if isinstance(root_paths, str) else list(root_paths)
 
         scanned_records: List[Dict[str, Any]] = []
+        seen_paths: set = set()
         limit_reached = False
 
+        try:
+            # The limit raises out of _walk_root, so it aborts the remaining roots here too —
+            # the 10,000 budget is shared, not per-root.
+            for root_path in roots:
+                norm_root = normalize_path(root_path)
+                if not os.path.exists(norm_root):
+                    # A root that vanished between workspace creation and this scan. Skipping it
+                    # is right — the other folders are still indexable — but it is never silent:
+                    # a silent skip is precisely the #105 failure mode.
+                    logger.warning(f"[SCAN-CMD-01] Root path no longer exists, skipped: '{norm_root}'")
+                    continue
+                self._walk_root(workspace_id, norm_root, scanned_records, seen_paths)
+        except ScanLimitReachedException:
+            if raise_on_limit:
+                # Persist what the walk did collect before propagating, so the partial index
+                # survives the exception.
+                self.file_repo.bulk_upsert(scanned_records)
+                raise
+            limit_reached = True
+
+        # Bulk upsert scanned records into DB
+        self.file_repo.bulk_upsert(scanned_records)
+        return scanned_records, limit_reached
+
+    def _walk_root(
+        self,
+        workspace_id: str,
+        norm_root: str,
+        scanned_records: List[Dict[str, Any]],
+        seen_paths: set,
+    ) -> None:
+        """
+        Walk one root, appending to the shared `scanned_records` budget.
+
+        Raises ScanLimitReachedException on hitting the 10,000 cap so that `scan_workspace`
+        decides between the raising and the flag-returning contract in one place — and so the
+        cap stops the *remaining roots* too, not just this one.
+        """
         for current_dir, dirs, files in os.walk(norm_root, topdown=True):
             # Exclude blacklisted directories in-place
             dirs[:] = [d for d in dirs if d.lower() not in self.BLACKLIST_DIRS]
 
             for fname in files:
                 ext = os.path.splitext(fname)[1].lower()
-                if ext in self.SUPPORTED_EXTENSIONS:
-                    full_path = os.path.join(current_dir, fname)
-                    norm_file_path = normalize_path(full_path)
+                if ext not in self.SUPPORTED_EXTENSIONS:
+                    continue
 
-                    try:
-                        stat = os.stat(norm_file_path)
-                        record = {
-                            "file_id": str(uuid.uuid4()),
-                            "workspace_id": workspace_id,
-                            "current_path": norm_file_path,
-                            "original_path": norm_file_path,
-                            "file_name": fname,
-                            "extension": ext,
-                            "size_bytes": stat.st_size,
-                            "last_modified": float(stat.st_mtime),
-                            "parse_status": "pending",
-                            "importance_score": 0,
-                        }
-                        scanned_records.append(record)
-                    except (PermissionError, OSError) as e:
-                        logger.warning(f"[SCAN-CMD-01] Skipping inaccessible file '{norm_file_path}': {e}")
-                        continue
+                full_path = os.path.join(current_dir, fname)
+                norm_file_path = normalize_path(full_path)
 
-                    if len(scanned_records) >= self.MAX_FILE_LIMIT:
-                        logger.warning(f"[SCAN-CMD-01] 10,000 file limit reached for workspace {workspace_id}")
-                        limit_reached = True
-                        if raise_on_limit:
-                            # Bulk upsert what we got so far before raising
-                            self.file_repo.bulk_upsert(scanned_records)
-                            raise ScanLimitReachedException("File count limit of 10,000 reached for workspace")
-                        break
+                # Two roots may nest (the user picks a folder and its parent), which would
+                # otherwise produce two records for one file — a duplicate that
+                # UNIQUE(workspace_id, current_path) turns into a bulk_upsert conflict, and
+                # that inflates the scanned count the dashboard shows.
+                if norm_file_path in seen_paths:
+                    continue
 
-            if limit_reached:
-                break
+                try:
+                    stat = os.stat(norm_file_path)
+                except (PermissionError, OSError) as e:
+                    logger.warning(f"[SCAN-CMD-01] Skipping inaccessible file '{norm_file_path}': {e}")
+                    continue
 
-        # Bulk upsert scanned records into DB
-        self.file_repo.bulk_upsert(scanned_records)
-        return scanned_records, limit_reached
+                seen_paths.add(norm_file_path)
+                scanned_records.append({
+                    "file_id": str(uuid.uuid4()),
+                    "workspace_id": workspace_id,
+                    "current_path": norm_file_path,
+                    "original_path": norm_file_path,
+                    "file_name": fname,
+                    "extension": ext,
+                    "size_bytes": stat.st_size,
+                    "last_modified": float(stat.st_mtime),
+                    "parse_status": "pending",
+                    "importance_score": 0,
+                })
+
+                if len(scanned_records) >= self.MAX_FILE_LIMIT:
+                    logger.warning(f"[SCAN-CMD-01] 10,000 file limit reached for workspace {workspace_id}")
+                    raise ScanLimitReachedException("File count limit of 10,000 reached for workspace")

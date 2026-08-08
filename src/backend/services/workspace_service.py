@@ -35,15 +35,23 @@ class WorkspaceService:
         if not root_paths:
             raise ValueError("At least one root path must be provided")
 
-        validated_paths = []
+        # De-duplicated while preserving order: two entries normalising to the same folder
+        # (e.g. a trailing separator, or the same path picked twice in the OS folder dialog)
+        # would otherwise hit Workspace_Root's UNIQUE constraint and fail the whole creation
+        # over what the user meant as one folder.
+        validated_paths: List[str] = []
         for p in root_paths:
             norm_p = normalize_path(p)
             if not os.path.exists(norm_p):
                 raise FileNotFoundError(f"Path does not exist: {p}")
-            validated_paths.append(norm_p)
+            if norm_p not in validated_paths:
+                validated_paths.append(norm_p)
 
-        primary_path = validated_paths[0]
-        return self.repo.create(name=name, root_path=primary_path)
+        return self.repo.create(name=name, root_paths=validated_paths)
+
+    def get_root_paths(self, workspace_id: str) -> List[str]:
+        """Root folders to traverse for this workspace (issue #105)."""
+        return self.repo.list_roots(workspace_id)
 
     def get_workspace(self, workspace_id: str) -> Optional[Dict[str, Any]]:
         return self.repo.get_by_id(workspace_id)

@@ -5,6 +5,7 @@ import uuid
 import pytest
 
 from src.backend.db import DatabaseManager
+from tests.fakes import insert_workspace
 
 
 @pytest.fixture
@@ -57,10 +58,7 @@ def test_scenario_2_pragmas_and_basic_crud(temp_db):
 
     ws_id = str(uuid.uuid4())
     with temp_db.transaction() as tx:
-        tx.execute(
-            "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
-            (ws_id, "Test Workspace", "C:\\TestDir"),
-        )
+        insert_workspace(tx, ws_id, "Test Workspace", "C:\\TestDir")
 
     cursor.execute("SELECT workspace_name FROM Workspace_Meta WHERE workspace_id = ?;", (ws_id,))
     row = cursor.fetchone()
@@ -73,10 +71,7 @@ def test_scenario_3_interrupted_task_recovery(temp_db):
     task_id = str(uuid.uuid4())
 
     with temp_db.transaction() as tx:
-        tx.execute(
-            "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
-            (ws_id, "Test WS", "C:\\TestDir2"),
-        )
+        insert_workspace(tx, ws_id, "Test WS", "C:\\TestDir2")
         tx.execute(
             "INSERT INTO Async_Task (task_id, workspace_id, task_type, status) VALUES (?, ?, ?, ?);",
             (task_id, ws_id, "deep_analysis", "running"),
@@ -97,10 +92,7 @@ def test_scenario_4_cascade_delete(temp_db):
     wiki_id = str(uuid.uuid4())
 
     with temp_db.transaction() as tx:
-        tx.execute(
-            "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
-            (ws_id, "Cascade WS", "C:\\CascadeDir"),
-        )
+        insert_workspace(tx, ws_id, "Cascade WS", "C:\\CascadeDir")
         tx.execute(
             """INSERT INTO File_Meta
                (file_id, workspace_id, current_path, original_path, file_name, extension, size_bytes, last_modified)
@@ -132,10 +124,7 @@ def test_scenario_5_timestamp_utc_iso_format(temp_db):
     wiki_id = str(uuid.uuid4())
 
     with temp_db.transaction() as tx:
-        tx.execute(
-            "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?);",
-            (ws_id, "TS WS", "C:\\TSDir"),
-        )
+        insert_workspace(tx, ws_id, "TS WS", "C:\\TSDir")
         tx.execute(
             """INSERT INTO Wiki_Content (wiki_id, workspace_id, folder_1depth, markdown_content)
                VALUES (?, ?, ?, ?);""",

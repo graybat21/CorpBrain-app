@@ -25,7 +25,7 @@ def wa_setup():
         file_repo = FileRepository(db_mgr)
         scanner = ScannerService(file_repo)
 
-        ws_res = ws_repo.create("Watcher Test WS", tmpdir)
+        ws_res = ws_repo.create("Watcher Test WS", [tmpdir])
         ws_id = ws_res["workspace_id"]
 
         f1 = os.path.join(tmpdir, "watch_doc1.txt")

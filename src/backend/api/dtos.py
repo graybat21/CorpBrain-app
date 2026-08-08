@@ -62,7 +62,10 @@ class WorkspaceCreateReq(BaseModel):
 class WorkspaceItemRes(BaseModel):
     workspace_id: str
     workspace_name: str
-    root_path: str
+    # Every merged root, in selection order (issue #105). The v001 single `root_path` field is
+    # gone rather than retained alongside this list: two representations of the same fact drift,
+    # and a consumer reading only the scalar is how multi-folder merging silently stopped working.
+    root_paths: List[str]
     created_at: str
     updated_at: str
 

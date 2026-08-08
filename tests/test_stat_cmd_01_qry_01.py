@@ -21,7 +21,7 @@ def stat_setup():
         file_repo = FileRepository(db_mgr)
         config_mgr = ConfigManager(db_mgr)
 
-        ws_res = ws_repo.create("Analytics Test WS", tmpdir)
+        ws_res = ws_repo.create("Analytics Test WS", [tmpdir])
         ws_id = ws_res["workspace_id"]
 
         f1_id = "stat_file_001"

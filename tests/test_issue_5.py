@@ -14,6 +14,7 @@ import os
 import tempfile
 
 from src.backend.db import DatabaseManager
+from tests.fakes import insert_workspace
 
 # Test session token (same as other API tests)
 SESSION_TOKEN = "test-token-for-issue-5"
@@ -68,10 +69,7 @@ def test_wiki_tabs_are_isolated_by_folder_1depth():
 
             # Create workspace
             ws_id = str(uuid.uuid4())
-            conn.execute(
-                "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?)",
-                (ws_id, "Test", tmpdir),
-            )
+            insert_workspace(conn, ws_id, "Test", tmpdir)
 
             # Insert wiki for two folders (current schema has no deeplink_mappings column)
             wiki_a_id = str(uuid.uuid4())
@@ -129,10 +127,7 @@ def test_markdown_contains_file_id_anchors_not_absolute_paths():
             conn = db_mgr.get_connection()
 
             ws_id = str(uuid.uuid4())
-            conn.execute(
-                "INSERT INTO Workspace_Meta (workspace_id, workspace_name, root_path) VALUES (?, ?, ?)",
-                (ws_id, "Test", tmpdir),
-            )
+            insert_workspace(conn, ws_id, "Test", tmpdir)
 
             file_id = str(uuid.uuid4())
             wiki_id = str(uuid.uuid4())

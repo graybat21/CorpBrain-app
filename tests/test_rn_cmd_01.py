@@ -15,7 +15,7 @@ def rename_service():
         migrations_dir = os.path.join(os.path.dirname(__file__), "..", "migrations")
         db_mgr = DatabaseManager(db_path=db_path, migrations_dir=migrations_dir)
         ws_repo = WorkspaceRepository(db_mgr)
-        ws = ws_repo.create("RN WS", tmpdir)
+        ws = ws_repo.create("RN WS", [tmpdir])
         service = RenameService(db_mgr=db_mgr)
         yield service, ws["workspace_id"], tmpdir
         db_mgr.close()
