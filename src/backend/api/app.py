@@ -229,10 +229,34 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         response = await call_next(request)
         return response
 
+    # Exception handlers: map known exceptions to DEC-03 error codes
+    @app.exception_handler(Exception)
+    async def generic_exception_handler(request: Request, exc: Exception):
+        from src.backend.services.vector_service import EmbeddingModelChangedError
+
+        if isinstance(exc, EmbeddingModelChangedError):
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content=ApiResponse[None].fail("EMBEDDING_MODEL_CHANGED", str(exc)).model_dump(),
+            )
+        # Other unhandled exceptions fall to INTERNAL_ERROR
+        import logging
+        logger = logging.getLogger("CorpBrain.API")
+        logger.exception(f"Unhandled exception: {type(exc).__name__}: {exc}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ApiResponse[None].fail("INTERNAL_ERROR", "An internal error occurred").model_dump(),
+        )
+
     # Every route carries an explicit response_model. DEC-02 makes the generated OpenAPI schema
     # the contract SSOT, and a route without one contributes an empty `{}` response schema —
     # there is then nothing for the frontend types to be generated from. tests/test_ws_fe_01.py
     # asserts this holds for every /api/v1 route so a new one cannot skip it.
+
+    @app.get("/api/v1/health")
+    def health():
+        return ApiResponse.success({"status": "ok", "app": "CorpBrain"})
+>>>>>>> d231181 (feat: add embedding model change consent flow (issue #88 / AC S3))
 
     @app.get("/api/v1/health", response_model=ApiResponse[HealthRes])
     def health():
@@ -790,5 +814,54 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         svc = WorkspaceQueryService(db_mgr)
         items = [WorkspaceItemRes(**ws) for ws in svc.list_workspaces()]
         return ApiResponse.success(WorkspaceListRes(items=items, total=len(items)))
+
+    # --- Embedding Model Change Consent & Re-embedding (DEC-06 AC S3) ---
+
+    @app.post("/api/v1/workspace/{workspace_id}/reembed")
+    def reembed_workspace_endpoint(workspace_id: str, consent_model: str, consent_dim: int):
+        """
+        User consent to drop the workspace's vector collection and re-analyze all files with
+        the current embedding model. DEC-04: returns 202 + task_id, client polls for progress.
+
+        Args:
+            workspace_id: target workspace
+            consent_model: user-confirmed target model name (must match App_Config)
+            consent_dim: user-confirmed target dimension (must match App_Config)
+
+        Returns:
+            202 + task_id if consent token is valid and task is submitted
+            409 EMBEDDING_MODEL_CHANGED if token is stale/mismatched
+            404 NOT_FOUND if workspace does not exist
+        """
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+
+        consent_token = f"granted:{consent_model}:{consent_dim}"
+
+        def reembed_body(ctx):
+            from src.backend.config_manager import ConfigManager
+            from src.backend.services.vector_service import DeepAnalysisService, VectorDBManager
+
+            # Reset collection (consent is checked inside this call)
+            v_db = VectorDBManager(workspace_id=workspace_id, persist_dir=db_mgr.vectors_dir, config_mgr=ConfigManager(db_mgr))
+            v_db.reset_workspace_for_reembedding(consent_token)
+            v_db.close()
+
+            # Reset all File_Meta rows to pending (DEC-16: no separate retry queue)
+            conn = db_mgr.get_connection()
+            conn.execute("UPDATE File_Meta SET parse_status = 'pending' WHERE workspace_id = ?;", (workspace_id,))
+            conn.commit()
+
+            # Run full deep analysis
+            service = DeepAnalysisService(db_mgr)
+            batch_result = service.run_deep_analysis_batch(workspace_id)
+            return {"batch_result": batch_result}
+
+        task = app.state.task_runner.submit("reembed", reembed_body, workspace_id=workspace_id, total_count=0)
+        return _accepted(task)
 
     return app
