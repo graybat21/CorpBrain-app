@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   LayoutDashboard,
   FolderTree,
@@ -10,10 +10,12 @@ import {
   HardDrive
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
+import { CreateWorkspaceModal } from './CreateWorkspaceModal';
 
 export const Sidebar: React.FC = () => {
-  const { activeTab, setActiveTab, currentWorkspace, workspaces, selectWorkspace, addToast } =
+  const { activeTab, setActiveTab, currentWorkspace, workspaces, selectWorkspace, addToast, bootstrap } =
     useAppStore();
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   const navItems = [
     { id: 'dashboard', label: '대시보드 (Analytics)', icon: LayoutDashboard },
@@ -31,11 +33,7 @@ export const Sidebar: React.FC = () => {
           <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1.5 flex items-center justify-between">
             <span>현재 워크스페이스</span>
             <button
-              onClick={() =>
-                // WS-FE-02 (issue #63) owns the creation modal and the OS folder picker; a
-                // pywebview folder dialog is not reachable from here yet.
-                addToast('info', '워크스페이스 추가는 후속 작업(#63)에서 제공됩니다.')
-              }
+              onClick={() => setIsCreateModalOpen(true)}
               className="hover:text-indigo-400 p-0.5 transition"
               title="워크스페이스 추가"
             >
@@ -117,6 +115,17 @@ export const Sidebar: React.FC = () => {
           <span className="text-slate-300 font-mono">Max 7일 / 10MB</span>
         </div>
       </div>
+
+      {/* Create Workspace Modal (WS-FE-02 / Issue #63) */}
+      <CreateWorkspaceModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSuccess={() => {
+          addToast('success', '워크스페이스가 생성되었습니다.');
+          void bootstrap(); // Reload workspace list
+        }}
+        onError={(msg) => addToast('error', msg)}
+      />
     </aside>
   );
 };

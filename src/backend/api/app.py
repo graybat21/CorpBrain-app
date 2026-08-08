@@ -255,11 +255,6 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
     # there is then nothing for the frontend types to be generated from. tests/test_ws_fe_01.py
     # asserts this holds for every /api/v1 route so a new one cannot skip it.
 
-    @app.get("/api/v1/health")
-    def health():
-        return ApiResponse.success({"status": "ok", "app": "CorpBrain"})
->>>>>>> d231181 (feat: add embedding model change consent flow (issue #88 / AC S3))
-
     @app.get("/api/v1/health", response_model=ApiResponse[HealthRes])
     def health():
         return ApiResponse.success(HealthRes(status="ok", app="CorpBrain"))
