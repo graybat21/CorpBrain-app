@@ -376,9 +376,16 @@ class DeepLinkOpenReq(BaseModel):
 
 
 class DeepLinkOpenRes(BaseModel):
+    """
+    DL-CMD-02 success. Carries the file *name*, never its path (issue #19).
+
+    `opened_path` used to be here and was a full absolute path — the one thing DEC-08 keeps off
+    the client, returned on the happy path of the very feature DEC-08 exists for. No frontend
+    consumer ever read it; a name is what a UI can legitimately display.
+    """
     status: str
     file_id: str
-    opened_path: str
+    file_name: str
 
 
 class DeepLinkStatusRes(BaseModel):

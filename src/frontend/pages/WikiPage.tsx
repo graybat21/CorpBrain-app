@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { BookOpen, ExternalLink, Link2, FileCheck, Loader2, AlertCircle } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { BookOpen, Link2, Loader2, AlertCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import * as api from '../api/client';
 import { errorMessage } from '../api/client';
+import { extractFileIds, remarkDeepLink } from '../api/remarkDeepLink';
+import { DeepLinkBadge } from '../components/DeepLinkBadge';
 import { useAppStore } from '../store/appStore';
 import type { WikiTabRes } from '../api/types.gen';
 
@@ -13,6 +15,13 @@ export const WikiPage: React.FC = () => {
   const [selectedTab, setSelectedTab] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * file_id -> is_broken, from DL-QRY-01 (AC S2, issue #19).
+   *
+   * Absent means "not probed yet", which renders as a neutral badge rather than as broken — a
+   * link shown grey before its status is known would accuse a perfectly good file.
+   */
+  const [brokenById, setBrokenById] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!currentWorkspace) {
@@ -43,6 +52,34 @@ export const WikiPage: React.FC = () => {
   }, [currentWorkspace, selectedTab, addToast]);
 
   /**
+   * Probe every anchor in the visible tab (DL-QRY-01 / AC S2).
+   *
+   * Per-tab rather than for the whole workspace: only the rendered tab's badges can be seen, and
+   * a workspace-wide sweep would issue a request per anchor across every folder on first load.
+   * `Promise.allSettled` because one unreachable probe must not blank out the rest — an
+   * unresolved id simply stays neutral.
+   */
+  const probeAnchors = useCallback(
+    async (workspaceId: string, markdown: string) => {
+      const ids = extractFileIds(markdown);
+      if (ids.length === 0) {
+        return;
+      }
+      const settled = await Promise.allSettled(
+        ids.map((id) => api.getDeepLinkStatus(workspaceId, id)),
+      );
+      const next: Record<string, boolean> = {};
+      settled.forEach((outcome, index) => {
+        if (outcome.status === 'fulfilled') {
+          next[ids[index]] = outcome.value.is_broken;
+        }
+      });
+      setBrokenById((prev) => ({ ...prev, ...next }));
+    },
+    [],
+  );
+
+  /**
    * DL-FE-02: resolve and open through the backend.
    *
    * The path is never sent or displayed — DEC-08 resolves `file_id` server-side. A missing row
@@ -53,6 +90,12 @@ export const WikiPage: React.FC = () => {
       addToast('warning', '워크스페이스를 먼저 선택하세요.');
       return;
     }
+    if (brokenById[fileId] === true) {
+      // REQ-FUNC-022: a broken link answers with a Toast rather than a failed open. The badge is
+      // deliberately still clickable so this feedback is reachable at all.
+      addToast('warning', '원본 파일을 찾을 수 없습니다. 파일이 이동되었거나 삭제되었습니다.');
+      return;
+    }
     try {
       await api.openDeepLink(currentWorkspace.workspace_id, { file_id: fileId });
       await api.logAnalyticsEvent(currentWorkspace.workspace_id, {
@@ -61,10 +104,20 @@ export const WikiPage: React.FC = () => {
       });
     } catch (err) {
       addToast('warning', `링크를 열 수 없습니다: ${errorMessage(err)}`);
+      // The open failed, so re-probe: the most likely cause is that the file has just gone
+      // missing, and the badge should go grey rather than stay inviting.
+      void probeAnchors(currentWorkspace.workspace_id, `[[file_id:${fileId}]]`);
     }
   };
 
   const currentTabData = tabs.find((t) => t.folder_1depth === selectedTab);
+
+  // Probe the visible tab's anchors once its content is available (AC S2).
+  useEffect(() => {
+    if (currentWorkspace && currentTabData) {
+      void probeAnchors(currentWorkspace.workspace_id, currentTabData.markdown_content);
+    }
+  }, [currentWorkspace, currentTabData, probeAnchors]);
 
   return (
     <div className="p-6 space-y-6 overflow-y-auto h-full">
@@ -132,38 +185,26 @@ export const WikiPage: React.FC = () => {
           {/* Markdown Content Area (AC S2) */}
           <div className="lg:col-span-2 bg-slate-900/90 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-2xl text-slate-200 text-sm leading-relaxed prose prose-invert max-w-none">
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={[remarkGfm, remarkDeepLink]}
               components={{
-                p: ({ children }) => {
-                  const text = String(children);
-                  if (text.includes('[[file_id:')) {
-                    const parts = text.split(/(\[\[file_id:[0-9a-zA-F\-]+\]\])/);
-                    return (
-                      <p>
-                        {parts.map((part, idx) => {
-                          const match = part.match(/\[\[file_id:([0-9a-zA-F\-]+)\]\]/);
-                          if (match) {
-                            const fid = match[1];
-                            return (
-                              <button
-                                key={idx}
-                                onClick={() => void handleAnchorClick(fid)}
-                                className="inline-flex items-center space-x-1 bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/60 px-2 py-0.5 rounded font-mono text-xs transition mx-1"
-                              >
-                                <FileCheck className="w-3 h-3 text-indigo-400" />
-                                <span>[[file_id:{fid.substring(0, 8)}...]]</span>
-                                <ExternalLink className="w-2.5 h-2.5 ml-0.5 text-indigo-400" />
-                              </button>
-                            );
-                          }
-                          return part;
-                        })}
-                      </p>
-                    );
+                /* The plugin emits `corpbrain-deeplink` nodes wherever an anchor appears —
+                   paragraphs, list items, table cells, headings. The previous implementation
+                   overrode `p` and called String(children), which stringified sibling elements
+                   to "[object Object]" and never looked outside a paragraph at all. */
+                'corpbrain-deeplink': ({ node }: any) => {
+                  const fileId = String(node?.properties?.fileid ?? '');
+                  if (!fileId) {
+                    return null;
                   }
-                  return <p>{children}</p>;
+                  return (
+                    <DeepLinkBadge
+                      fileId={fileId}
+                      isBroken={fileId in brokenById ? brokenById[fileId] : null}
+                      onOpen={(id) => void handleAnchorClick(id)}
+                    />
+                  );
                 },
-              }}
+              } as any}
             >
               {currentTabData.markdown_content}
             </ReactMarkdown>
