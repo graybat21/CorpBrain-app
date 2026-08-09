@@ -1,9 +1,13 @@
+import logging
+import os
 import re
 from typing import Any, Dict, List, Optional
 
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
 from src.backend.utils.platform_compat import open_with_default_app
+
+logger = logging.getLogger("CorpBrain.DeepLinkService")
 
 
 class DeepLinkService:
@@ -70,7 +74,6 @@ class DeepLinkService:
         - Resolves current_path via Late Binding from File_Meta at call time.
         - Returns DEC-03 compliant error codes on failure.
         """
-        import os
         path = self.resolve_deeplink_path(workspace_id, file_id)
 
         if path is None:
@@ -81,10 +84,16 @@ class DeepLinkService:
             }
 
         if not os.path.exists(path):
+            # The path is logged, never returned (DEC-03 / DEC-08, issue #19). This message
+            # reaches the client verbatim through the route, and it used to interpolate the
+            # absolute path — leaking `C:\Users\<account>\...` to exactly the layer DEC-08 keeps
+            # paths away from. The user cannot act on the path anyway; the file name can be
+            # obtained from the deeplink status endpoint.
+            logger.warning("[DL-CMD-02] Deeplink target missing for file_id %s", file_id)
             return {
                 "status": "error",
                 "error_code": "PATH_NOT_ACCESSIBLE",
-                "message": f"File path no longer accessible: {path}"
+                "message": "원본 파일을 찾을 수 없습니다. 파일이 이동되었거나 삭제되었습니다."
             }
 
         try:
@@ -94,12 +103,20 @@ class DeepLinkService:
             return {
                 "status": "success",
                 "file_id": file_id,
-                "opened_path": path
+                # The name, not the path (DEC-08). `basename` is applied here rather than at the
+                # API layer so no caller of this service receives a path it might forward.
+                "file_name": os.path.basename(path),
             }
         except OSError as e:
+            # `str(e)` on an OSError stringifies to the path it failed on ("[Errno 2] No such
+            # file or directory: 'C:\\Users\\...'"), so it cannot be returned either. The type
+            # and the real message go to the local log (issue #24 made that a real file).
+            logger.warning(
+                "[DL-CMD-02] Failed to open file_id %s: %s: %s", file_id, type(e).__name__, e
+            )
             return {
                 "status": "error",
                 "error_code": "PATH_NOT_ACCESSIBLE",
-                "message": str(e)
+                "message": "파일을 열 수 없습니다. 권한 또는 연결 프로그램을 확인하세요."
             }
 

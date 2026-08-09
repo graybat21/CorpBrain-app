@@ -63,7 +63,12 @@ def test_scenario_1_deeplink_open_file_success(qry_setup):
         result = svc.open_file(ws_id, f1_id)
         assert result["status"] == "success"
         assert result["file_id"] == f1_id
-        assert result["opened_path"] == f1
+        # The response carries the file NAME (issue #19): `opened_path` used to return the full
+        # absolute path to the client, which is precisely what DEC-08 keeps off it. The path is
+        # still asserted — via the mock, which is where it legitimately appears, since the OS call
+        # is the one consumer that needs it.
+        assert result["file_name"] == os.path.basename(f1)
+        assert "opened_path" not in result
         mock_open.assert_called_once_with(f1)
 
 
