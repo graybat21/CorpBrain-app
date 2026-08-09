@@ -648,10 +648,14 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         # at the API layer instead of pushing Pydantic into the service (CLAUDE.md §4).
         items = [item.model_dump() for item in payload.items] if payload and payload.items else None
         history_id = payload.history_id if payload else None
+        # AC S2 (issue #40): the user's selection, as file_ids. `None` means "apply all".
+        file_ids = payload.file_ids if payload else None
 
         def body(ctx):
             from src.backend.services.rename_service import RenameService
-            res = RenameService(db_mgr).apply_rename(workspace_id, items=items, history_id=history_id)
+            res = RenameService(db_mgr).apply_rename(
+                workspace_id, items=items, history_id=history_id, file_ids=file_ids
+            )
             total = len(res.get("succeeded", [])) + len(res.get("failed", []))
             ctx.set_total(total)
             ctx.advance(total)

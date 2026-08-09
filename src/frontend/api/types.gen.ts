@@ -332,6 +332,7 @@ export interface RenameApplyItemReq {
 export interface RenameApplyReq {
   items?: RenameApplyItemReq[] | null;
   history_id?: string | null;
+  file_ids?: string[] | null;
 }
 
 /**

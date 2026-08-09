@@ -300,6 +300,13 @@ class RenameApplyItemReq(BaseModel):
 class RenameApplyReq(BaseModel):
     items: Optional[List[RenameApplyItemReq]] = None
     history_id: Optional[str] = None
+    # AC S2 (issue #40): apply only these files out of the batch. `None` means "all of them",
+    # which keeps every existing caller working.
+    #
+    # `file_id`s, never paths: DEC-08 keeps absolute paths off the client, so the frontend cannot
+    # name a file any other way — and accepting a caller-supplied path here would be the exact
+    # hole DEC-08 closes. The server intersects these ids with the history row it already holds.
+    file_ids: Optional[List[str]] = None
 
 
 class RenameUndoReq(BaseModel):

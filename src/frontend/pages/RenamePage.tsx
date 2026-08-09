@@ -20,8 +20,38 @@ export const RenamePage: React.FC = () => {
   const [isApplying, setIsApplying] = useState(false);
   const [appliedHistoryId, setAppliedHistoryId] = useState<string | null>(null);
 
-  const pendingCount = items.filter((item) => item.status === APPLICABLE_STATUS).length;
+  /**
+   * The file_ids the user has approved (AC S2, issue #40).
+   *
+   * Tracks approvals rather than rejections, so a newly generated diff starts from an explicit
+   * set rather than inheriting stale rejections from a previous run. Only `pending` rows can
+   * ever enter it — `addAllPending` is the only writer that adds in bulk, and the per-row
+   * checkbox is disabled for excluded rows (DEC-17).
+   */
+  const [approvedIds, setApprovedIds] = useState<Set<string>>(new Set());
+
+  const pendingItems = items.filter((item) => item.status === APPLICABLE_STATUS);
+  const pendingCount = pendingItems.length;
   const excludedCount = items.length - pendingCount;
+  const approvedCount = pendingItems.filter((item) => approvedIds.has(item.file_id)).length;
+  const allPendingApproved = pendingCount > 0 && approvedCount === pendingCount;
+
+  const toggleOne = (fileId: string) => {
+    setApprovedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) {
+        next.delete(fileId);
+      } else {
+        next.add(fileId);
+      }
+      return next;
+    });
+  };
+
+  /** Header checkbox: select or clear every applicable row. Excluded rows are never included. */
+  const toggleAll = () => {
+    setApprovedIds(allPendingApproved ? new Set() : new Set(pendingItems.map((i) => i.file_id)));
+  };
 
   const handleGenerate = async () => {
     if (!currentWorkspace) {
@@ -36,6 +66,12 @@ export const RenamePage: React.FC = () => {
       setItems(diff.items);
       setHistoryId(diff.history_id ?? null);
       setAppliedHistoryId(null);
+      // Pre-approve every applicable row: the common case is "apply what was suggested", and
+      // AC S2 is about being able to *deselect* one. Excluded rows are omitted, so a PII row can
+      // never be approved by default (DEC-17).
+      setApprovedIds(
+        new Set(diff.items.filter((i) => i.status === APPLICABLE_STATUS).map((i) => i.file_id)),
+      );
       addToast('success', `파일명 추천 ${diff.items.length}건을 생성했습니다.`);
     } catch (err) {
       addToast('error', errorMessage(err));
@@ -49,11 +85,21 @@ export const RenamePage: React.FC = () => {
       addToast('warning', '적용할 추천 결과가 없습니다. 먼저 추천을 생성하세요.');
       return;
     }
+    if (approvedIds.size === 0) {
+      // Sending an empty selection would apply nothing and still consume a task slot; say so
+      // instead of appearing to work.
+      addToast('warning', '승인된 파일이 없습니다. 적용할 항목을 선택하세요.');
+      return;
+    }
     setIsApplying(true);
     try {
-      // history_id rather than an items array: the server holds the path pairs (DEC-08), so the
-      // client never sends a path and cannot rename a file outside the generated diff.
-      const task = await api.applyRename(currentWorkspace.workspace_id, { history_id: historyId });
+      // history_id plus the approved file_ids (AC S2). Never an items array with paths: the
+      // server holds the path pairs (DEC-08), so the client cannot rename a file outside the
+      // generated diff, and a selection can only be expressed as ids.
+      const task = await api.applyRename(currentWorkspace.workspace_id, {
+        history_id: historyId,
+        file_ids: Array.from(approvedIds),
+      });
       const done = await api.pollTask(task.task_id);
 
       if (done.status === 'failed') {
@@ -148,7 +194,7 @@ export const RenamePage: React.FC = () => {
             className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-900 disabled:text-emerald-300/60 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-lg transition"
           >
             <Check className="w-3.5 h-3.5" />
-            <span>{isApplying ? '적용 중...' : `안전 파일명 일괄 적용 (${pendingCount})`}</span>
+            <span>{isApplying ? '적용 중...' : `선택 적용 (${approvedCount}/${pendingCount})`}</span>
           </button>
         </div>
       </div>
@@ -168,6 +214,18 @@ export const RenamePage: React.FC = () => {
         <table className="w-full text-left text-xs text-slate-300">
           <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800 uppercase text-[10px] tracking-wider">
             <tr>
+              <th className="p-3.5 w-10">
+                {/* Select-all covers applicable rows only — an excluded row must not become
+                    approved by a bulk action (DEC-17 / AC S3). */}
+                <input
+                  type="checkbox"
+                  checked={allPendingApproved}
+                  onChange={toggleAll}
+                  disabled={pendingCount === 0}
+                  aria-label="적용 대상 전체 선택"
+                  className="accent-indigo-500 disabled:opacity-40"
+                />
+              </th>
               <th className="p-3.5">기존 파일명</th>
               <th className="p-3.5">제안된 새로운 파일명</th>
               <th className="p-3.5">상태</th>
@@ -177,8 +235,28 @@ export const RenamePage: React.FC = () => {
           <tbody className="divide-y divide-slate-800/60">
             {items.map((item) => (
               <tr key={item.file_id} className="hover:bg-slate-800/40 transition">
-                <td className="p-3.5 font-medium text-slate-300 font-mono">{item.old_name}</td>
-                <td className="p-3.5 font-medium text-indigo-300 font-mono flex items-center space-x-1.5">
+                <td className="p-3.5">
+                  {/* AC S3: an excluded row's checkbox is disabled, so it cannot be approved at
+                      all — the name only changes if the user types one in manually. */}
+                  <input
+                    type="checkbox"
+                    checked={approvedIds.has(item.file_id)}
+                    onChange={() => toggleOne(item.file_id)}
+                    disabled={item.status !== APPLICABLE_STATUS}
+                    aria-label={`${item.old_name} 적용 선택`}
+                    className="accent-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                  />
+                </td>
+                {/* AC S1: before in red, after in green. Colours are rose-300 / emerald-300 —
+                    measured at 9.44:1 and 11.71:1 against the slate-900 panel, so both clear
+                    WCAG AA (4.5:1) for body text with margin. Rose-400/emerald-400 also pass
+                    (6.63 / 9.29) if a stronger hue is wanted later; anything darker does not.
+                    Colour is not the only cue — the status column carries the same information
+                    as text, since a red/green pair alone fails for colour-blind users. */}
+                <td className="p-3.5 font-medium text-rose-300 font-mono line-through decoration-rose-500/40">
+                  {item.old_name}
+                </td>
+                <td className="p-3.5 font-medium text-emerald-300 font-mono flex items-center space-x-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   <span>{item.new_name}</span>
                 </td>

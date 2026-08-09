@@ -340,13 +340,19 @@ class RenameService:
         self,
         workspace_id: str,
         items: Optional[List[Dict[str, Any]]] = None,
-        history_id: Optional[str] = None
+        history_id: Optional[str] = None,
+        file_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Executes OS-level physical file rename and updates SQLite File_Meta (RN-CMD-02 / DEC-08 / DEC-05).
         - Updates File_Meta.current_path and file_name per file commit (DEC-05).
         - Leaves original_path and Wiki_Content untouched (DEC-08).
         - Handles file locks/errors via partial failure (HTTP 207).
+
+        `file_ids` narrows the batch to the user's selection (AC S2, issue #40). `None` applies
+        everything, which is what every existing caller expects. The filter is applied to the
+        resolved pairs rather than trusting the caller to send paths — DEC-08 keeps absolute paths
+        off the client, so a selection can only ever be expressed as ids.
         """
         if not items and history_id:
             conn = self.db_mgr.get_connection()
@@ -366,6 +372,14 @@ class RenameService:
                     r = c.fetchone()
                     if r:
                         items.append({"file_id": r["file_id"], "old_path": old_p, "new_path": new_p})
+
+        if items and file_ids is not None:
+            # Intersect rather than reorder or extend: an id the batch does not contain is
+            # silently dropped, because the alternative is renaming a file the history row never
+            # described. An empty selection therefore applies nothing, which is the correct
+            # reading of "the user approved none of them".
+            selected = set(file_ids)
+            items = [i for i in items if i["file_id"] in selected]
 
         if not items:
             return {"status": "completed", "applied_count": 0, "failed": []}
