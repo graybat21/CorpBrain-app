@@ -325,6 +325,20 @@ class WatcherConfigReq(BaseModel):
     debounce_ms: int = 500
 
 
+class WatcherIdleFlushRes(BaseModel):
+    """
+    WA-TEST-02 / #60: the outcome of an idle-mode batch flush.
+
+    `status` is `not_idle` (threshold not reached), `interrupted` (activity resumed mid-flush, so
+    `remaining` events stay queued), or `flushed`. Reported rather than inferred, because the
+    frontend needs to know whether to keep polling or to stop.
+    """
+    workspace_id: str
+    status: str
+    processed: int
+    remaining: int
+
+
 class WatcherStatusRes(BaseModel):
     workspace_id: str
     mode: str

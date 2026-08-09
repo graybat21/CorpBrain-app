@@ -153,6 +153,12 @@ export interface ApiResponse_WatcherConfigRes_ {
   error?: ApiError | null;
 }
 
+export interface ApiResponse_WatcherIdleFlushRes_ {
+  ok: boolean;
+  data?: WatcherIdleFlushRes | null;
+  error?: ApiError | null;
+}
+
 export interface ApiResponse_WatcherStatusRes_ {
   ok: boolean;
   data?: WatcherStatusRes | null;
@@ -444,6 +450,20 @@ export interface WatcherConfigRes {
   debounce_ms: number;
 }
 
+/**
+ * WA-TEST-02 / #60: the outcome of an idle-mode batch flush.
+ *
+ * `status` is `not_idle` (threshold not reached), `interrupted` (activity resumed mid-flush, so
+ * `remaining` events stay queued), or `flushed`. Reported rather than inferred, because the
+ * frontend needs to know whether to keep polling or to stop.
+ */
+export interface WatcherIdleFlushRes {
+  workspace_id: string;
+  status: string;
+  processed: number;
+  remaining: number;
+}
+
 export interface WatcherStatusRes {
   workspace_id: string;
   mode: string;
@@ -532,6 +552,7 @@ export const API_PATHS = {
   GET_workspace_scan_summary: "/api/v1/workspace/{workspace_id}/scan/summary",
   GET_workspace_watcher_config: "/api/v1/workspace/{workspace_id}/watcher/config",
   POST_workspace_watcher_config: "/api/v1/workspace/{workspace_id}/watcher/config",
+  POST_workspace_watcher_idle_flush: "/api/v1/workspace/{workspace_id}/watcher/idle-flush",
   GET_workspace_watcher_status: "/api/v1/workspace/{workspace_id}/watcher/status",
   GET_workspace_wiki: "/api/v1/workspace/{workspace_id}/wiki",
   POST_workspace_wiki_generate: "/api/v1/workspace/{workspace_id}/wiki/generate",

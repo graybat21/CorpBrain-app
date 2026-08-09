@@ -35,6 +35,7 @@ from src.backend.api.dtos import (
     TaskResultRes,
     WatcherConfigReq,
     WatcherConfigRes,
+    WatcherIdleFlushRes,
     WatcherStatusRes,
     WikiTabRes,
     WorkspaceCreateReq,
@@ -781,6 +782,45 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         # `get_status`, not `queue.qsize()`: the queue is process-wide, so the raw size reported
         # other workspaces' pending events as this one's (issue #58).
         return ApiResponse.success(WatcherStatusRes(**app.state.watcher_service.get_status(workspace_id)))
+
+    @app.post(
+        "/api/v1/workspace/{workspace_id}/watcher/idle-flush",
+        response_model=ApiResponse[WatcherIdleFlushRes],
+    )
+    def watcher_idle_flush_endpoint(workspace_id: str, active: bool = False):
+        """
+        Idle-mode batch processing (#60 / REQ-FUNC-026).
+
+        `active=true` reports user input, which resets the idle clock and pauses flushing (AC S2).
+        The backend cannot observe keyboard or mouse itself — that needs an OS-level hook, which
+        on Windows is indistinguishable from a keylogger to a security auditor (CON-03). So
+        activity is reported by the frontend, not sniffed.
+
+        Synchronous rather than a DEC-04 task: it processes at most a few queued items per call
+        and the frontend is already polling, so a task id would add a second poll for nothing.
+        """
+        ws = app.state.ws_service.get_workspace(workspace_id)
+        if not ws:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=ApiResponse[None].fail("NOT_FOUND", f"Workspace {workspace_id} not found").model_dump(),
+            )
+        from src.backend.services.watcher_service import WatcherService
+        if not hasattr(app.state, "watcher_service"):
+            app.state.watcher_service = WatcherService(db_mgr, app.state.scanner_service.file_repo)
+
+        watcher = app.state.watcher_service
+        if active:
+            watcher.notify_user_activity()
+            return ApiResponse.success(WatcherIdleFlushRes(
+                workspace_id=workspace_id,
+                status="interrupted",
+                processed=0,
+                remaining=watcher.queued_count(workspace_id),
+            ))
+
+        result = watcher.flush_idle_queue(workspace_id)
+        return ApiResponse.success(WatcherIdleFlushRes(workspace_id=workspace_id, **result))
 
     # --- Analytics & Statistics Endpoints (STAT-CMD-01 & STAT-QRY-01) ---
 
