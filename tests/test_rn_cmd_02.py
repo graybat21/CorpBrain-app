@@ -124,7 +124,24 @@ def test_scenario_4_undo_rename_reverts_physical_file_and_meta(rn_setup):
     files = db_mgr.get_connection().cursor().execute("SELECT * FROM File_Meta WHERE workspace_id = ?;", (ws_id,)).fetchall()
     file_dicts = [dict(r) for r in files]
     # Called for its side effect: it writes the Rename_History row read just below.
-    rs.process_rename_suggestions(ws_id, file_dicts)
+    #
+    # The callback mirrors the `2026-08_<original>` names this test builds by hand further down
+    # (`new_list`), because undo_rename reverts the history row while apply_rename acts on
+    # `items` — the two must describe the same pairs or the undo has nothing to match. It used
+    # to line up implicitly with a hardcoded default inside the service; issue #37 replaced that
+    # with a real LLM call, so the convention is now stated here instead of coincidental. The
+    # per-file name also keeps two files from colliding on one target.
+    # Derive the suggestion from the prompt rather than a call counter: `file_dicts` comes from
+    # a SELECT, so its order is not `[f1, f2]`, and an index-based double renamed each file to
+    # the other's target. The prompt carries the masked filename (DEC-17), which is enough to
+    # reproduce the `2026-08_<original>` names this test builds by hand in `new_list` below.
+    def _suggest(prompt: str) -> str:
+        for original in (os.path.basename(f1), os.path.basename(f2)):
+            if original in prompt:
+                return f"2026-08_{original}"
+        raise AssertionError(f"prompt named no known file: {prompt!r}")
+
+    rs.process_rename_suggestions(ws_id, file_dicts, mock_llm_callback=_suggest)
 
     # Get generated Rename_History history_id
     conn = db_mgr.get_connection()

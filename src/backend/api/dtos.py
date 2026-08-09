@@ -248,8 +248,13 @@ class RenameDiffItemRes(BaseModel):
 
     Names only, never paths: DEC-17 keeps absolute paths out of anything that reaches the LLM,
     and DEC-08 keeps them out of anything cached client-side. `status` is one of
-    `pending` / `PII_TOKEN_LEFT` / `PII_MASKING_FAILED` / `INVALID_FILENAME`; anything other
-    than `pending` means the file is excluded from the batch and needs manual review.
+    `pending` / `PII_TOKEN_LEFT` / `PII_MASKING_FAILED` / `INVALID_FILENAME` / `LLM_FAILED`;
+    anything other than `pending` means the file is excluded from the batch and needs manual
+    review.
+
+    `LLM_FAILED` (issue #37) is the DEC-16 partial-failure case: the suggestion call was retried
+    and gave up, so this one file keeps its original name while the rest of the batch proceeds.
+    It is a per-item status, not an error envelope — the request itself succeeded.
     """
     file_id: str
     old_name: str
