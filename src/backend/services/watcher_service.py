@@ -126,6 +126,7 @@ class WatcherService:
         file_repo: FileRepository,
         deep_analysis_service: Optional[DeepAnalysisService] = None,
         workspace_repo: Optional[WorkspaceRepository] = None,
+        idle_threshold_sec: float = 300.0,
     ):
         self.db_mgr = db_mgr
         self.file_repo = file_repo
@@ -140,6 +141,11 @@ class WatcherService:
         self._observers: Dict[str, Observer] = {}
         self._worker_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        # REQ-FUNC-026: 5 minutes. Injectable so a test can assert the boundary without waiting.
+        self.idle_threshold_sec = idle_threshold_sec
+        # Starts "now", not 0: a freshly launched app has an active user, and treating boot as
+        # 50 years of idleness would flush the whole backlog while they are still looking at it.
+        self._last_activity_at = time.time()
 
     def get_config(self, workspace_id: str) -> Dict[str, Any]:
         """Gets WatcherConfig for workspace (WA-CMD-01 / REQ-FUNC-023)."""
@@ -275,15 +281,81 @@ class WatcherService:
         if not is_enabled:
             queued = 0
         else:
-            queued = sum(
-                1 for item in list(self.queue.queue) if item.get("workspace_id") == workspace_id
-            )
+            queued = self.queued_count(workspace_id)
         return {
             "workspace_id": workspace_id,
             "mode": config["mode"],
             "is_enabled": is_enabled,
             "queued_items_count": queued,
         }
+
+    def notify_user_activity(self, at: Optional[float] = None) -> None:
+        """
+        Record that the user is active, which pauses idle-mode flushing (WA-TEST-02 / #60).
+
+        Called by the frontend on interaction. The backend cannot observe keyboard or mouse input
+        itself — that needs OS hooks, which for a security-reviewed app (CON-03) is a cost far out
+        of proportion to the benefit, and on Windows a global hook is indistinguishable from a
+        keylogger to an auditor. So "is the user active" is reported, not sniffed.
+        """
+        self._last_activity_at = at if at is not None else time.time()
+
+    def is_idle(self, now: Optional[float] = None) -> bool:
+        """
+        Whether the idle threshold has elapsed since the last reported activity (REQ-FUNC-026).
+
+        `now` is injectable so a test can assert the 5-minute boundary without waiting five
+        minutes — a sleep-based test of this would be both slow and, on a loaded runner, flaky.
+        """
+        current = now if now is not None else time.time()
+        return (current - self._last_activity_at) >= self.idle_threshold_sec
+
+    def flush_idle_queue(
+        self, workspace_id: str, now: Optional[float] = None, max_items: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Idle-mode batch processing (AC S1/S2 of #60).
+
+        AC S1: once idle, the accumulated events are processed in one pass rather than one per
+        poll. AC S2: if activity is reported mid-flush, processing **stops** — the whole point of
+        idle mode is that analysis never competes with the user for CPU (REQ-NF-002/CON-05), and
+        finishing "just this batch" is exactly when the user notices the machine is busy.
+
+        Returns `{status, processed, remaining}`. `status` is one of:
+          - `not_idle`   — the threshold has not elapsed; nothing was touched.
+          - `interrupted` — activity resumed partway; `remaining` events stay queued.
+          - `flushed`    — the queue is drained for this workspace.
+
+        The activity check runs **before each item**, not once at the start: a flush of ten
+        documents can take minutes, and checking only up front would ignore input for that whole
+        time — which is the behaviour AC S2 forbids.
+        """
+        if not self.is_idle(now):
+            return {"status": "not_idle", "processed": 0, "remaining": self.queued_count(workspace_id)}
+
+        processed = 0
+        while max_items is None or processed < max_items:
+            # Re-checked every iteration (AC S2). `now` is held fixed by tests that want to
+            # simulate "still idle"; a test that wants an interruption reports activity instead.
+            if not self.is_idle(now):
+                return {
+                    "status": "interrupted",
+                    "processed": processed,
+                    "remaining": self.queued_count(workspace_id),
+                }
+            if self.queued_count(workspace_id) == 0:
+                break
+            if self.process_next_queued_item() is None:
+                break
+            processed += 1
+
+        return {"status": "flushed", "processed": processed, "remaining": self.queued_count(workspace_id)}
+
+    def queued_count(self, workspace_id: str) -> int:
+        """Pending events for one workspace. See `get_status` for why this is not `qsize()`."""
+        return sum(
+            1 for item in list(self.queue.queue) if item.get("workspace_id") == workspace_id
+        )
 
     def process_next_queued_item(self) -> Optional[Dict[str, Any]]:
         """

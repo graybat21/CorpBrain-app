@@ -31,6 +31,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -195,7 +196,13 @@ def _path_key(method: str, path: str) -> str:
     last = raw_segments[-1]
     if last.startswith("{") and last.endswith("}"):
         segments.append("item")
-    return f"{method.upper()}_{'_'.join(segments)}"
+    key = f"{method.upper()}_{'_'.join(segments)}"
+    # A hyphen in a path segment (`/watcher/idle-flush`) is legal in a URL but not in a
+    # TypeScript identifier, so the emitted object literal failed to parse — `tsc` reported
+    # `TS1005: ',' expected` in a GENERATED file, which reads as a generator bug rather than a
+    # routing choice and sends the reader to the wrong place. Normalising here means any future
+    # hyphenated route just works.
+    return re.sub(r"[^A-Za-z0-9_]", "_", key)
 
 
 def render_paths(schema: Dict[str, Any]) -> str:
