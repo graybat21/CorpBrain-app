@@ -1,6 +1,7 @@
 import React from 'react';
 import { ShieldCheck, Cpu, Minus, Square, X } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
+import { WatcherControl } from './WatcherControl';
 
 export const TitleBar: React.FC = () => {
   const llmMode = useAppStore((state) => state.llmMode);
@@ -18,6 +19,10 @@ export const TitleBar: React.FC = () => {
       </div>
 
       <div className="flex items-center space-x-3 pywebview-no-drag">
+        {/* AC S2 (#56): the queue badge sits beside the watcher icon in the header, which is
+            where it is visible regardless of which page is open. */}
+        <WatcherControl />
+
         <div className="flex items-center space-x-1.5 bg-slate-800/80 px-2 py-1 rounded-full text-[11px] border border-slate-700/60">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
           <span className="text-slate-300">NetworkGuard:</span>
