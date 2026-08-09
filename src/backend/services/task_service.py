@@ -146,6 +146,16 @@ class TaskRunner:
                     "failed",
                     error_code=getattr(e, "error_code", None) or "INTERNAL_ERROR",
                     error_message=f"{type(e).__name__}: {e}",
+                    # An exception may carry structured data the UI needs in order to render
+                    # the failure correctly (issue #31): a provisioning failure must tell the
+                    # frontend whether the mode was `detect_only` — because DEC-13 forbids
+                    # offering a retry button on a closed network — and which models are
+                    # missing. Without this the failure path persisted result_json=NULL and
+                    # that information died with the worker thread.
+                    #
+                    # Only an explicit `task_result` attribute is read, never the exception's
+                    # own str(): DEC-03 keeps exception text out of anything a client reads.
+                    result=getattr(e, "task_result", None),
                 )
             except Exception:
                 logger.exception("[TaskRunner] Could not record failure for task %s", task_id)
