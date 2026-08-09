@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ShieldCheck, Cpu, Lock, Globe, Key, RefreshCw } from 'lucide-react';
 import * as api from '../api/client';
 import { errorMessage } from '../api/client';
+import { LlmOnboardPanel } from '../components/LlmOnboardPanel';
 import type { LlmHealthCheckRes } from '../api/types.gen';
 import { useAppStore, type LlmMode } from '../store/appStore';
 
@@ -11,15 +12,32 @@ export const SettingsPage: React.FC = () => {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  const loadHealth = useCallback(async () => {
-    try {
-      const res = await api.getLlmConfig();
-      setHealth(res);
-      setLlmMode(res.mode === 'Option B' ? 'Option B' : 'Option A');
-    } catch (err) {
-      addToast('error', errorMessage(err));
-    }
-  }, [addToast, setLlmMode]);
+  /**
+   * `quiet` suppresses the toast for the 5s background probe (issue #31).
+   *
+   * Without it the LLM-FE-02 panel's polling raises a toast every 5 seconds whenever the
+   * backend is unreachable — a stack of identical errors that buries every other notification.
+   * The state still updates, so the ❌ icon reports the failure; only the interruption is
+   * dropped. REQ-NF-010 wants the settings UI usable with the LLM down, not shouting about it.
+   */
+  const loadHealth = useCallback(
+    async (quiet = false) => {
+      try {
+        const res = await api.getLlmConfig();
+        setHealth(res);
+        setLlmMode(res.mode === 'Option B' ? 'Option B' : 'Option A');
+      } catch (err) {
+        setHealth(null);
+        if (!quiet) {
+          addToast('error', errorMessage(err));
+        }
+      }
+    },
+    [addToast, setLlmMode],
+  );
+
+  /** Stable callback for the panel's 5s interval, so it never toasts. */
+  const loadHealthQuietly = useCallback(() => loadHealth(true), [loadHealth]);
 
   useEffect(() => {
     void loadHealth();
@@ -122,6 +140,12 @@ export const SettingsPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* LLM-FE-02 (issue #31): provisioning progress + per-model readiness. Rendered for both
+          modes on purpose — DEC-06 makes the embedding model a requirement for Option A too, so
+          hiding this panel behind `llmMode === 'Option B'` would leave an Option A user unable
+          to see why deep analysis is unavailable. */}
+      <LlmOnboardPanel health={health} onProvisioned={loadHealthQuietly} />
 
       {/* Security Status Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

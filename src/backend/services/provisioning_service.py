@@ -84,12 +84,37 @@ class ProvisioningError(Exception):
 
     Carries `error_code` so TaskRunner's generic handler records the DEC-03 code rather than
     INTERNAL_ERROR, and `required_models` so the UI can list exactly what to copy in.
+
+    `task_result` is what TaskRunner persists into `Async_Task.result_json` on the failure path
+    (issue #31). It must survive the failure, not just the success: the frontend decides whether
+    to offer a retry button from `provision_mode`, and DEC-13 forbids offering one in
+    `detect_only` — pressing it on a closed network can only fail again. A failure that recorded
+    nothing left the UI unable to tell the two modes apart.
+
+    `message` is user-facing Korean written for this purpose, never an OS or exception string,
+    so surfacing it is safe under DEC-03.
     """
 
-    def __init__(self, message: str, required_models: Optional[List[str]] = None):
+    def __init__(
+        self,
+        message: str,
+        required_models: Optional[List[str]] = None,
+        provision_mode: Optional[str] = None,
+        purpose: Optional[str] = None,
+        daemon_online: bool = False,
+    ):
         super().__init__(message)
         self.error_code = "LLM_PROVISION_REQUIRED"
         self.required_models = required_models or []
+        self.provision_mode = provision_mode
+        self.task_result = {
+            "provision_mode": provision_mode,
+            "purpose": purpose,
+            "daemon_online": daemon_online,
+            "required_models": self.required_models,
+            "missing_models": self.required_models,
+            "reason": message,
+        }
 
 
 class ProvisioningService:
@@ -219,9 +244,28 @@ class ProvisioningService:
         installed = self.list_installed_models()
         daemon_online = installed is not None
 
-        if mode == MODE_DETECT_ONLY:
-            return self._detect_only(purpose, required, installed, report)
-        return self._assisted(purpose, required, installed, daemon_online, report)
+        try:
+            if mode == MODE_DETECT_ONLY:
+                return self._detect_only(purpose, required, installed, report)
+            return self._assisted(purpose, required, installed, daemon_online, report)
+        except ProvisioningError as e:
+            # Stamp the context onto every failure at one choke point instead of threading
+            # `mode`/`purpose` through a dozen deep raise sites (issue #31). A new raise site
+            # added later inherits this automatically — whereas per-site plumbing is something
+            # the next change forgets, and a failure with no `provision_mode` leaves the UI
+            # unable to tell whether a retry button is allowed (DEC-13).
+            e.provision_mode = mode
+            e.task_result = {
+                **e.task_result,
+                "provision_mode": mode,
+                "purpose": purpose,
+                "daemon_online": daemon_online,
+                # `required_models` from the raise site is the *missing* subset when it named
+                # one; the full requirement list is what the offline instructions need.
+                "required_models": required,
+                "missing_models": e.required_models or required,
+            }
+            raise
 
     def _detect_only(
         self,
