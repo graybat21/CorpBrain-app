@@ -487,7 +487,18 @@ def test_rename_diff_returns_history_id(api_client):
     data = diff.json()["data"]
     assert data["history_id"], "rename diff must return the Rename_History id"
     assert len(data["items"]) == 1
-    assert data["items"][0]["status"] == "pending"
+    # `LLM_FAILED`, not `pending`: no LLM is reachable in a test process, and since issue #37
+    # replaced the hardcoded `2026-08_` stub with a real call, a suggestion can no longer be
+    # produced without one. That is the DEC-16 partial-failure contract — the file keeps its
+    # original name and the batch continues — and asserting `pending` here would only be
+    # asserting that a stub still exists. The status vocabulary itself is covered by
+    # tests/test_issue_37.py; what this test owns is that the route returns the envelope with a
+    # history_id and one item per file.
+    item = data["items"][0]
+    assert item["status"] in ("pending", "LLM_FAILED"), item
+    assert item["old_name"] == "기획안.txt"
+    if item["status"] == "LLM_FAILED":
+        assert item["new_name"] == item["old_name"], "a failed suggestion must keep the original name"
 
 
 # --- CORE #6: every error path reaches the client as the DEC-03 envelope -----------------

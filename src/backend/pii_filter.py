@@ -16,14 +16,44 @@ class MaskedResult:
 
 class PIIFilter:
     # 7 Regex Patterns (DEC-14)
+    #
+    # Boundaries are `(?<!\d)` / `(?!\d)` rather than `\b`, and this is a security fix, not a
+    # style preference (found while wiring DEC-17's rename path, issue #37).
+    #
+    # `\b` sits between a word character and a non-word character, but `_` IS a word character.
+    # So in `홍길동_주민등록증_900101-1234567.pdf` there is no boundary between `_` and `9`, and
+    # the RRN was **not masked at all** — it went out in the transmission payload verbatim. That
+    # is exactly the leak DEC-17 exists to prevent, and filenames are full of underscores.
+    #
+    # A digit-only lookaround is also the *correct* boundary for these patterns: what must not
+    # match is a longer run of digits (a 20-digit id containing a valid-looking RRN), not an
+    # adjacent letter or underscore. `[^\d]` on either side would consume the neighbouring
+    # character and shift the replacement offsets, so lookarounds are used.
+    #
+    # No nested quantifiers anywhere below (ReDoS — DEC-14), and no pattern is assembled from
+    # user input.
     PATTERNS = {
-        "RRN": re.compile(r"\b\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])-[1-4]\d{6}\b"),
-        "PHONE": re.compile(r"\b01[016789]-\d{3,4}-\d{4}\b|\b0(2|[3-6][1-5])-\d{3,4}-\d{4}\b"),
-        "EMAIL": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
-        "CARD": re.compile(r"\b\d{4}-\d{4}-\d{4}-\d{4}\b|\b\d{4} \d{4} \d{4} \d{4}\b"),
-        "BIZNO": re.compile(r"\b\d{3}-\d{2}-\d{5}\b"),
-        "ACCOUNT": re.compile(r"\b\d{3,6}-\d{2,6}-\d{3,6}\b"),
-        "PASSPORT": re.compile(r"\b[M1S]\d{8}\b"),
+        "RRN": re.compile(r"(?<!\d)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])-[1-4]\d{6}(?!\d)"),
+        "PHONE": re.compile(
+            r"(?<!\d)01[016789]-\d{3,4}-\d{4}(?!\d)|(?<!\d)0(2|[3-6][1-5])-\d{3,4}-\d{4}(?!\d)"
+        ),
+        # EMAIL: `_` is legal *inside* a local part, so it is included in the character class
+        # instead of being treated as a boundary. `\b` at the start failed the same way as RRN —
+        # `email_hong@example.com` left the address unmasked because there is no boundary
+        # between `_` and `h`. Anchoring on "not an address character" also means the leading
+        # underscores of `기획_hong@example.com` are excluded from the match rather than
+        # swallowed into it.
+        "EMAIL": re.compile(
+            r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![A-Za-z0-9.-])"
+        ),
+        "CARD": re.compile(
+            r"(?<!\d)\d{4}-\d{4}-\d{4}-\d{4}(?!\d)|(?<!\d)\d{4} \d{4} \d{4} \d{4}(?!\d)"
+        ),
+        "BIZNO": re.compile(r"(?<!\d)\d{3}-\d{2}-\d{5}(?!\d)"),
+        "ACCOUNT": re.compile(r"(?<!\d)\d{3,6}-\d{2,6}-\d{3,6}(?!\d)"),
+        # PASSPORT keeps a letter-side guard: `M12345678` inside `ROOM12345678` is not a passport
+        # number, so the preceding character must not be alphanumeric.
+        "PASSPORT": re.compile(r"(?<![A-Za-z0-9])[M1S]\d{8}(?![A-Za-z0-9])"),
     }
 
     def _ner_scan(self, text: str):

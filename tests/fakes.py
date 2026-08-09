@@ -9,6 +9,7 @@ a live Ollama returns 768 floats — is covered by the opt-in `@pytest.mark.olla
 """
 
 import hashlib
+import json
 import shutil
 import struct
 import tempfile
@@ -157,3 +158,47 @@ def chroma_temp_dir():
                     break
                 # Short, growing sleep: the handle is normally gone within a few tens of ms.
                 time.sleep(0.05 * (attempt + 1))
+
+
+class RecordingLlmRouter:
+    """
+    LLMRouter stand-in that records the prompts it was given (issue #37).
+
+    Records the prompt because that is the DEC-17 assertion: the Rename path is a second cloud
+    transmission channel, so what matters is that the text handed to the router is the *masked*
+    one and carries no absolute path. A double that only returned a name could not prove that.
+
+    `reply` may be a string (used verbatim) or a callable taking the prompt, so a test can vary
+    the answer per file. `raises` makes every call fail, for the DEC-16 partial-failure path.
+    """
+
+    def __init__(self, reply="2026-08_문서.pdf", raises=None):
+        self.reply = reply
+        self.raises = raises
+        self.prompts: List[str] = []
+
+    def generate(self, prompt: str, max_tokens: int = 200) -> Dict[str, Any]:
+        self.prompts.append(prompt)
+        if self.raises is not None:
+            raise self.raises
+        name = self.reply(prompt) if callable(self.reply) else self.reply
+        return {
+            "content": json.dumps({"suggested_name": name}, ensure_ascii=False),
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+            "cost_usd": 0.0,
+        }
+
+
+class NoRetryResilience:
+    """
+    Runs the call once and propagates. Keeps DEC-16-policy tests off the wall-clock.
+
+    The real backoff (1s → 2s → 4s) is asserted in tests/test_llm_cmd_03.py; repeating those
+    sleeps in every rename test would add ~7s per failure case and test nothing new.
+    """
+
+    def execute_with_retry(self, func, file_id, is_transient_error=None):
+        return func()
+
+    def reset_failure_counter(self):
+        pass

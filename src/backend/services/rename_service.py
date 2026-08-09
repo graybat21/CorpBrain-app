@@ -20,14 +20,120 @@ class RenameService:
         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
     }
 
-    def __init__(self, db_mgr: DatabaseManager, pii_filter: Optional[PIIFilter] = None):
+    #: The instruction sent to the LLM. Deliberately demands JSON only: a model that explains
+    #: itself in prose would have its prose parsed as a filename.
+    #:
+    #: Note what the context does NOT contain — no absolute path, no drive letter, no
+    #: `C:\Users\<account>`, no UNC server name (DEC-17). Only the filename, extension, the
+    #: 1-depth folder name and a depth count, which is the whole allowance.
+    SUGGEST_PROMPT_TEMPLATE = (
+        "다음 파일에 대해 일관된 규칙의 새 파일명 하나를 제안하세요.\n"
+        "규칙: [연도-월]_[문서종류]_[핵심주제] 형식, 한글 유지, 확장자 보존.\n"
+        "파일명: {file_name}\n"
+        "확장자: {extension}\n"
+        "상위 폴더: {folder_1depth}\n"
+        "폴더 깊이: {depth_level}\n"
+        '반드시 이 JSON 형식만 출력하세요: {{"suggested_name": "새이름{extension}"}}'
+    )
+
+    def __init__(
+        self,
+        db_mgr: DatabaseManager,
+        pii_filter: Optional[PIIFilter] = None,
+        llm_router: Optional[Any] = None,
+        resilience: Optional[Any] = None,
+    ):
         self.db_mgr = db_mgr
         self.pii_filter = pii_filter or PIIFilter()
+        # Injected so a test can drive the real masking/parsing/validation path without a live
+        # model. Constructed lazily rather than defaulted to None: a None router that silently
+        # skipped the LLM is exactly the hardcoded-suggestion state this issue replaces
+        # (DECISION_LOG 재발방지 4 — a default that bypasses the real path proves nothing).
+        self._llm_router = llm_router
+        # DEC-16: max 3 attempts, exponential backoff, transient errors only.
+        self._resilience = resilience
         # The history row written by the most recent process_rename_suggestions call, read back
         # by generate_rename_diff. Per-instance rather than returned from
         # process_rename_suggestions so that method's List return type is unchanged for its
         # three existing callers.
         self._last_history_id: Optional[str] = None
+
+    @property
+    def llm_router(self) -> Any:
+        """The LLMRouter, built on first use so constructing this service stays cheap."""
+        if self._llm_router is None:
+            from src.backend.config_manager import ConfigManager
+            from src.backend.services.llm_router import LLMRouter
+            self._llm_router = LLMRouter(ConfigManager(self.db_mgr))
+        return self._llm_router
+
+    @property
+    def resilience(self) -> Any:
+        if self._resilience is None:
+            from src.backend.services.llm_resilience_service import LLMResilienceService
+            self._resilience = LLMResilienceService()
+        return self._resilience
+
+    @staticmethod
+    def _is_transient(exc: Exception) -> bool:
+        """
+        DEC-16: retry 429/5xx and connect/read timeouts only.
+
+        Never retried: 401 (bad key), 400 (bad request), EgressBlockedError (DEC-15),
+        PIIMaskingFailedException (DEC-14). Retrying those burns cost and time for an identical
+        outcome — and re-running a masking failure would repeatedly attempt to transmit.
+        """
+        from src.backend.network_guard import (
+            EgressBlockedError,
+            UpstreamStatusError,
+            UpstreamUnavailableError,
+        )
+
+        if isinstance(exc, (EgressBlockedError, PIIMaskingFailedException)):
+            return False
+        if isinstance(exc, UpstreamStatusError):
+            return exc.status_code == 429 or 500 <= exc.status_code < 600
+        if isinstance(exc, (UpstreamUnavailableError, TimeoutError)):
+            return True
+        return False
+
+    @classmethod
+    def parse_suggestion(cls, content: str, fallback_extension: str = "") -> Optional[str]:
+        """
+        Pull `suggested_name` out of the model's reply.
+
+        Tolerates the two things models do even when told not to: wrapping JSON in a ```json
+        fence, and adding a sentence before or after it. A brace-scan is used rather than
+        `json.loads(content)` so surrounding prose does not discard an otherwise valid answer.
+
+        Returns None when nothing usable is present — the caller then keeps the original name
+        rather than inventing one (DEC-16 partial failure).
+        """
+        if not content:
+            return None
+
+        start = content.find("{")
+        end = content.rfind("}")
+        if start != -1 and end > start:
+            try:
+                parsed = json.loads(content[start : end + 1])
+                name = parsed.get("suggested_name")
+                if isinstance(name, str) and name.strip():
+                    # Returned verbatim, NOT stripped. A trailing space or dot is invalid on
+                    # Windows, and quietly trimming it here would hand `is_valid_windows_filename`
+                    # a name the model never proposed — so the validation would pass on a
+                    # different string than the one under review. Let the validator reject it and
+                    # tell the user, rather than silently repairing a name they will then approve.
+                    return name
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+        # A bare filename on its own line is accepted as a last resort, but only if it looks
+        # like one — otherwise a refusal sentence ("죄송하지만...") would become a filename.
+        stripped = content.strip()
+        if fallback_extension and stripped.endswith(fallback_extension) and "\n" not in stripped:
+            return stripped
+        return None
 
     @classmethod
     def build_prompt_context(cls, file_meta: Dict[str, Any]) -> Dict[str, Any]:
@@ -107,16 +213,17 @@ class RenameService:
 
         for f in files:
             ctx = self.build_prompt_context(f)
-            raw_prompt = f"Recommend standardized filename for file: {ctx['file_name']} in folder: {ctx['folder_1depth']}"
+            raw_prompt = self.SUGGEST_PROMPT_TEMPLATE.format(**ctx)
 
             try:
-                # DEC-17: the same PIIFilter gate as analysis chunks. The masked text is not
-                # bound to a name here because the current LLM call is a local mock; when a
-                # real Option A call replaces mock_llm_callback, masked_res.masked_text is
-                # what must be sent — never raw_prompt.
-                self.pii_filter.mask(raw_prompt)
+                # DEC-17: the same PIIFilter gate as analysis chunks — no Rename-specific
+                # masking logic, no separate token format, and no branch on "is this a chunk or
+                # a filename", because that branch is the bypass.
+                masked = self.pii_filter.mask(raw_prompt)
             except PIIMaskingFailedException as e:
-                logger.warning(f"[RN-CMD-01] PII masking failed for file: {e}")
+                # Fail-closed (DEC-14): the transmission is blocked. Only the exception is
+                # logged — never the filename, which is what the masking failed to sanitise.
+                logger.warning(f"[RN-CMD-01] PII masking failed, transmission blocked: {type(e).__name__}")
                 diff_results.append({
                     "file_id": f["file_id"],
                     "old_name": f["file_name"],
@@ -126,12 +233,30 @@ class RenameService:
                 })
                 continue
 
-            # Obtain LLM recommendation (mock or callback)
-            if mock_llm_callback:
-                suggested_name = mock_llm_callback(ctx["file_name"])
+            if masked.counts:
+                # Per-type counts only, never the matched strings (DEC-14 log hygiene).
+                logger.info(f"[RN-CMD-01] Masked PII before transmission: {masked.counts}")
+
+            if mock_llm_callback is not None:
+                # Retained for the three existing callers and for tests that need a fixed
+                # suggestion. It receives the *masked* prompt, not the raw filename, so a test
+                # double cannot accidentally exercise a path that skips the gate.
+                suggested_name = mock_llm_callback(masked.masked_text)
             else:
-                # Default mock rule: format as 2026-08_Name
-                suggested_name = f"2026-08_{ctx['file_name']}"
+                suggested_name = self._request_suggestion(masked.masked_text, ctx, f["file_id"])
+
+            if suggested_name is None:
+                # DEC-16 partial failure: this one file drops out and keeps its original name;
+                # the batch continues. The failure is not retried again here — `_request_suggestion`
+                # already exhausted the retry policy.
+                diff_results.append({
+                    "file_id": f["file_id"],
+                    "old_name": f["file_name"],
+                    "new_name": f["file_name"],
+                    "status": "LLM_FAILED",
+                    "note": "추천 실패 — 원래 이름 유지"
+                })
+                continue
 
             # Check leftover [PII:TYPE] tokens (DEC-17)
             if "[PII:" in suggested_name:
@@ -176,6 +301,40 @@ class RenameService:
         self._last_history_id = history_id
 
         return diff_results
+
+    def _request_suggestion(
+        self, masked_prompt: str, ctx: Dict[str, Any], file_id: str
+    ) -> Optional[str]:
+        """
+        Ask the configured engine for one filename, with the DEC-16 retry policy.
+
+        **`masked_prompt` is what goes out — never the raw prompt.** That is the whole point of
+        DEC-17: the Rename path is a second cloud transmission channel and uses the same gate as
+        analysis chunks.
+
+        Returns None on failure so the caller can keep the original name and continue with the
+        rest of the batch. The engine is never switched on failure (DEC-16): Option A ↔ Option B
+        changes whether documents leave the machine, so it only ever comes from an explicit
+        settings action.
+        """
+        try:
+            response = self.resilience.execute_with_retry(
+                lambda: self.llm_router.generate(masked_prompt, max_tokens=200),
+                file_id=file_id,
+                is_transient_error=self._is_transient,
+            )
+        except Exception as e:
+            # Bare `except Exception` is deliberate and narrow in effect: every failure mode
+            # here (unavailable engine, bad key, blocked egress, retries exhausted) has the same
+            # correct outcome — drop this one file. The type is logged; the message is not
+            # surfaced to a client (DEC-03).
+            logger.warning(
+                "[RN-CMD-01] Suggestion failed for file %s: %s", file_id, type(e).__name__
+            )
+            return None
+
+        content = (response or {}).get("content", "") if isinstance(response, dict) else ""
+        return self.parse_suggestion(content, ctx.get("extension", ""))
 
     def apply_rename(
         self,

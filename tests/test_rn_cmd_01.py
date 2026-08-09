@@ -6,6 +6,7 @@ import pytest
 from src.backend.db import DatabaseManager
 from src.backend.repositories.workspace_repository import WorkspaceRepository
 from src.backend.services.rename_service import RenameService
+from tests.fakes import NoRetryResilience, RecordingLlmRouter
 
 
 @pytest.fixture
@@ -16,8 +17,14 @@ def rename_service():
         db_mgr = DatabaseManager(db_path=db_path, migrations_dir=migrations_dir)
         ws_repo = WorkspaceRepository(db_mgr)
         ws = ws_repo.create("RN WS", [tmpdir])
-        service = RenameService(db_mgr=db_mgr)
-        yield service, ws["workspace_id"], tmpdir
+        # A recording router, not the default lazy one: these tests must exercise the real
+        # masking -> transmit -> parse -> validate path (issue #37), and the prompt it records is
+        # what the DEC-17 assertions inspect. A live model is not needed to prove any of that.
+        router = RecordingLlmRouter()
+        service = RenameService(
+            db_mgr=db_mgr, llm_router=router, resilience=NoRetryResilience()
+        )
+        yield service, ws["workspace_id"], tmpdir, router
         db_mgr.close()
 
 
@@ -37,7 +44,7 @@ def test_scenario_1_build_prompt_context_no_absolute_path():
 
 
 def test_scenario_2_pii_masking_before_llm(rename_service):
-    service, ws_id, tmpdir = rename_service
+    service, ws_id, tmpdir, router = rename_service
     pii_filename = "홍길동_주민등록증_900101-1234567.pdf"
 
     files = [
@@ -55,7 +62,7 @@ def test_scenario_2_pii_masking_before_llm(rename_service):
 
 
 def test_scenario_3_pii_token_leftover_rejection(rename_service):
-    service, ws_id, tmpdir = rename_service
+    service, ws_id, tmpdir, router = rename_service
     files = [
         {
             "file_id": "f2",
