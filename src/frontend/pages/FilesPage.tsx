@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Search, RefreshCw, FileText, Filter, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
 import * as api from '../api/client';
 import { errorMessage } from '../api/client';
@@ -46,9 +46,54 @@ export const FilesPage: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [progress, setProgress] = useState<TaskProgressRes | null>(null);
 
+  /**
+   * Search narrows the list without reordering it (issue #4).
+   *
+   * `filter` is order-preserving, so the importance ranking the backend returns
+   * (`ORDER BY importance_score DESC` — REQ-FUNC-012) survives the search. Re-sorting here
+   * would create a second source of truth for the ranking; see FileRepository for why the
+   * ordering belongs in the query.
+   */
   const filteredFiles = files.filter((f) =>
     f.file_name.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  /**
+   * Windowing: render a slice, grow it as the user scrolls (issue #4).
+   *
+   * The constraint is "1,000건 리스트 가상 스크롤". Implemented with a scroll handler over a
+   * fixed-height container instead of `react-window`/`react-virtuoso` — CLAUDE.md §4 forbids
+   * adding a dependency without documented justification, and a new runtime package would also
+   * enter the PyInstaller-embedded bundle (DEC-01). ~40 lines of state covers the actual
+   * requirement: keep the DOM node count bounded so 1,000 rows do not mount at once.
+   *
+   * Incremental growth rather than a true fixed window: rows here have variable height
+   * (filename wrapping), and absolute positioning by index would misplace them. Appending keeps
+   * the initial mount cheap — which is what the 1,000-row constraint is about — without
+   * pretending to a precision this table cannot deliver.
+   */
+  const VISIBLE_STEP = 100;
+  const [visibleCount, setVisibleCount] = useState(VISIBLE_STEP);
+
+  // Reset the window whenever the list identity changes, or a narrowed search would keep
+  // scrolling from a stale offset and appear to have fewer results than it does.
+  useEffect(() => {
+    setVisibleCount(VISIBLE_STEP);
+  }, [searchTerm, files]);
+
+  const visibleFiles = filteredFiles.slice(0, visibleCount);
+  const hasMore = visibleCount < filteredFiles.length;
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (!hasMore) {
+      return;
+    }
+    const { scrollTop, clientHeight, scrollHeight } = e.currentTarget;
+    // 200px of runway so the next slice is mounted before the user reaches the end.
+    if (scrollHeight - scrollTop - clientHeight < 200) {
+      setVisibleCount((n) => n + VISIBLE_STEP);
+    }
+  };
 
   /**
    * Scan, then fast-analyse, polling each task to a terminal state (DEC-04).
@@ -178,6 +223,8 @@ export const FilesPage: React.FC = () => {
 
       {/* Files Table */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+        {/* Fixed-height scroll container: what bounds the mounted row count (issue #4). */}
+        <div className="max-h-[60vh] overflow-y-auto" onScroll={handleScroll}>
         <table className="w-full text-left text-xs text-slate-300">
           <thead className="bg-slate-950/80 text-slate-400 font-semibold border-b border-slate-800 uppercase text-[10px] tracking-wider">
             <tr>
@@ -190,7 +237,7 @@ export const FilesPage: React.FC = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60">
-            {filteredFiles.map((file) => (
+            {visibleFiles.map((file) => (
               <tr key={file.file_id} className="hover:bg-slate-800/40 transition">
                 <td className="p-3.5 font-medium text-slate-200">
                   <div className="flex items-center space-x-2">
@@ -228,13 +275,43 @@ export const FilesPage: React.FC = () => {
             ))}
           </tbody>
         </table>
-
-        {filteredFiles.length === 0 && (
-          <p className="p-4 text-xs text-slate-400">
-            {files.length === 0
-              ? '스캔된 파일이 없습니다. 재스캔 및 분석을 실행하세요.'
-              : '검색 조건에 맞는 파일이 없습니다.'}
+        {hasMore && (
+          <p className="p-3 text-center text-[10px] text-slate-500 font-mono">
+            {visibleFiles.length} / {filteredFiles.length} 건 표시 — 스크롤하면 더 불러옵니다
           </p>
+        )}
+        </div>
+
+        {/* AC S2: an Empty State that carries its own run button (issue #4). The top-right
+            button was previously expected to serve double duty, but the AC asks for the action
+            where the user is looking — and "실행하세요" with no button to press is an
+            instruction, not an affordance. The two branches are distinct: nothing scanned yet
+            is a first-run state, while a search that matched nothing must not offer a rescan as
+            though the workspace were empty. */}
+        {filteredFiles.length === 0 && (
+          <div className="p-6 flex flex-col items-center gap-3 text-center">
+            {files.length === 0 ? (
+              <>
+                <FileText className="w-6 h-6 text-slate-600" />
+                <p className="text-xs text-slate-400">
+                  고속 분석을 실행하세요. 파일 중요도가 산출되면 높은 순으로 표시됩니다.
+                </p>
+                <button
+                  onClick={() => void handleRunScan()}
+                  disabled={isScanning || !currentWorkspace}
+                  className="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:text-indigo-200/60 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-lg transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin' : ''}`} />
+                  <span>{isScanning ? '분석 중...' : '고속 분석 실행'}</span>
+                </button>
+                {!currentWorkspace && (
+                  <p className="text-[10px] text-slate-500">먼저 워크스페이스를 선택하세요.</p>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-slate-400">검색 조건에 맞는 파일이 없습니다.</p>
+            )}
+          </div>
         )}
       </div>
     </div>
