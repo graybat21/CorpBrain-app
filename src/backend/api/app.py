@@ -614,7 +614,19 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         HTTP 207 is decided by the presence of `failed[]` in get_task_result_endpoint, not by
         this status label. `failed[]` is carried through untouched — DEC-16 requires per-file
         failures to reach the user, and a 202 response cannot carry them.
+
+        The one exception is `already_undone` (issue #39). DEC-03 lists `ALREADY_UNDONE` as a
+        standard error code, and RenamePage reads it off `error_code` after polling — so this
+        must be a *failed* task rather than a completed one with a status buried in `result`.
+        It is a real refusal: nothing was reverted, because the batch already had been.
         """
+        if res.get("error_code") == "ALREADY_UNDONE":
+            return {
+                "status": "failed",
+                "error_code": "ALREADY_UNDONE",
+                "error_message": "이미 원복된 변경 내역입니다.",
+                "result": res,
+            }
         return {
             "status": "completed",
             "result": res,

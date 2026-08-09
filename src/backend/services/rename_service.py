@@ -442,10 +442,18 @@ class RenameService:
         cursor = conn.cursor()
 
         if history_id:
-            cursor.execute("SELECT history_id, old_paths, new_paths FROM Rename_History WHERE history_id = ?;", (history_id,))
-        else:
             cursor.execute(
-                "SELECT history_id, old_paths, new_paths FROM Rename_History WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 1;",
+                """SELECT history_id, old_paths, new_paths, status, undone_at
+                   FROM Rename_History WHERE history_id = ?;""",
+                (history_id,),
+            )
+        else:
+            # Most recent first — "최근 변경된 항목 조회 (역순)". Without an explicit history_id
+            # the newest batch is the one the user means by "undo".
+            cursor.execute(
+                """SELECT history_id, old_paths, new_paths, status, undone_at
+                   FROM Rename_History WHERE workspace_id = ?
+                   ORDER BY created_at DESC LIMIT 1;""",
                 (workspace_id,)
             )
 
@@ -454,6 +462,25 @@ class RenameService:
             return {"status": "no_history", "reverted_count": 0, "failed": []}
 
         hist_id = row["history_id"]
+
+        # Already reverted: answer ALREADY_UNDONE rather than walking the pairs again.
+        #
+        # A second pass finds every file back at `old_path`, so `os.path.exists(new_path)` fails
+        # for all of them and the caller receives per-file FILE_NOT_FOUND — an error describing a
+        # missing file when the truth is that the work was already done. Worse, if the user has
+        # since created a *new* file at one of those `new_path` names, the second undo would
+        # rename that unrelated file (RenamePage already expects this code — issue #39).
+        if row["status"] == "reverted":
+            return {
+                "history_id": hist_id,
+                "status": "already_undone",
+                "error_code": "ALREADY_UNDONE",
+                "undone_at": row["undone_at"],
+                "reverted_count": 0,
+                "succeeded": [],
+                "failed": [],
+            }
+
         old_list = json.loads(row["old_paths"])
         new_list = json.loads(row["new_paths"])
 
@@ -461,7 +488,10 @@ class RenameService:
         failed = []
 
         # strict=True — same paired-array invariant as apply_rename.
-        for old_path, new_path in zip(old_list, new_list, strict=True):
+        # Reversed: the batch is undone in the opposite order it was applied. It matters when a
+        # batch renamed A→B and B→C — replaying forwards would put A back while C still occupies
+        # B's slot, and reverse order frees each target before the next revert needs it.
+        for old_path, new_path in reversed(list(zip(old_list, new_list, strict=True))):
             old_name = os.path.basename(old_path)
             # Find file_id by current_path == new_path
             cursor.execute("SELECT file_id FROM File_Meta WHERE current_path = ?;", (new_path,))
@@ -502,6 +532,21 @@ class RenameService:
                 })
 
         status = "reverted" if not failed else "multi_status"
+
+        # Mark the batch reverted only on a clean sweep. A partial revert stays un-flagged on
+        # purpose: some files are still at their new names, so the batch genuinely is not undone
+        # and a retry must be allowed to finish the job. Flagging it would strand those files
+        # behind ALREADY_UNDONE with no way to complete the revert.
+        if status == "reverted":
+            with self.db_mgr.transaction() as c:
+                c.execute(
+                    """UPDATE Rename_History
+                       SET status = 'reverted',
+                           undone_at = (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                       WHERE history_id = ?;""",
+                    (hist_id,),
+                )
+
         return {
             "history_id": hist_id,
             "status": status,
