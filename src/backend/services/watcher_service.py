@@ -253,6 +253,38 @@ class WatcherService:
         self.queue.put(item)
         logger.info(f"[WatcherService] Enqueued {event_type} event for {path}")
 
+    def get_status(self, workspace_id: str) -> Dict[str, Any]:
+        """
+        WA-QRY-01: mode, activity, and the queue depth **for this workspace** (issue #58).
+
+        `queue.qsize()` was previously reported directly, and the queue is process-wide — so a
+        workspace with one pending event reported three when two other workspaces were also busy.
+        The number drives a badge the user reads as "my files", which made it simply wrong.
+
+        `queue.queue` is peeked rather than drained: `get()` would consume the events the worker
+        thread needs. `deque` iteration is not atomic under a concurrent `put`, so the snapshot
+        may miss an event that arrives mid-count — acceptable for a 1-second-polled badge, and
+        the alternative (holding the queue's mutex) would block the worker to render a number.
+
+        A disabled watcher reports `queued_items_count: 0` per AC S2, because the queue is not
+        being drained: showing a stale backlog for a watcher that is off invites the user to wait
+        for progress that will never come.
+        """
+        config = self.get_config(workspace_id)
+        is_enabled = bool(config["is_enabled"])
+        if not is_enabled:
+            queued = 0
+        else:
+            queued = sum(
+                1 for item in list(self.queue.queue) if item.get("workspace_id") == workspace_id
+            )
+        return {
+            "workspace_id": workspace_id,
+            "mode": config["mode"],
+            "is_enabled": is_enabled,
+            "queued_items_count": queued,
+        }
+
     def process_next_queued_item(self) -> Optional[Dict[str, Any]]:
         """
         Processes single item from queue (WA-CMD-03 / DEC-09):

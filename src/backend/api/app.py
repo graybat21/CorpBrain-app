@@ -778,14 +778,9 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
         if not hasattr(app.state, "watcher_service"):
             app.state.watcher_service = WatcherService(db_mgr, app.state.scanner_service.file_repo)
 
-        cfg = app.state.watcher_service.get_config(workspace_id)
-        q_size = app.state.watcher_service.queue.qsize()
-        return ApiResponse.success(WatcherStatusRes(
-            workspace_id=workspace_id,
-            mode=cfg["mode"],
-            is_enabled=bool(cfg["is_enabled"]),
-            queued_items_count=q_size,
-        ))
+        # `get_status`, not `queue.qsize()`: the queue is process-wide, so the raw size reported
+        # other workspaces' pending events as this one's (issue #58).
+        return ApiResponse.success(WatcherStatusRes(**app.state.watcher_service.get_status(workspace_id)))
 
     # --- Analytics & Statistics Endpoints (STAT-CMD-01 & STAT-QRY-01) ---
 
