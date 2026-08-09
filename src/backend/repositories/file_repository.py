@@ -48,9 +48,29 @@ class FileRepository:
             )
 
     def list_by_workspace(self, workspace_id: str) -> List[Dict[str, Any]]:
+        """
+        Files of a workspace, most important first (ANA-FE-01 / REQ-FUNC-012, issue #4).
+
+        `ORDER BY importance_score DESC` rather than `file_name ASC`: AC Scenario 1 requires the
+        85-point 기획서 to appear **above** the 20-point 임시_메모, and the previous ordering put
+        the list in dictionary order with only the badge colour differing — so the ranking the
+        fast analysis computes was invisible.
+
+        Ordered here rather than in the React component on purpose. The ordering is a property
+        of "what the ranking means", not of one screen; sorting in the page would leave every
+        other consumer (and any future one) on the old order, and DEC-03 makes this response the
+        contract. `file_name ASC` stays as the tiebreaker so the list is deterministic — files
+        that were never analysed all sit at score 0, and without a second key their relative
+        order is whatever SQLite's scan happens to produce, which makes the UI reshuffle rows
+        between two identical requests.
+        """
         conn = self.db_mgr.get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM File_Meta WHERE workspace_id = ? ORDER BY file_name ASC;", (workspace_id,))
+        cursor.execute(
+            """SELECT * FROM File_Meta WHERE workspace_id = ?
+               ORDER BY importance_score DESC, file_name ASC;""",
+            (workspace_id,),
+        )
         return [dict(row) for row in cursor.fetchall()]
 
     def update_path(self, workspace_id: str, file_id: str, new_path: str, new_filename: Optional[str] = None):
