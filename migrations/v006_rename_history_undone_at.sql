@@ -1,0 +1,22 @@
+-- v006: record when a rename batch was reverted (issue #39 / RN-CMD-03)
+--
+-- RN-CMD-03 requires the history row to move to `status='reverted'` with an `undone_at`
+-- timestamp, and a second undo of the same batch to answer `ALREADY_UNDONE` (409). Neither was
+-- possible: `undo_rename` never read or wrote `status`, so re-running it walked the same
+-- old/new pairs a second time. The files are already back at `old_path` by then, so every entry
+-- fails `os.path.exists(new_path)` and the caller gets `FILE_NOT_FOUND` per file — an error that
+-- describes a missing file rather than the truth, which is that the work was already done.
+--
+-- `undone_at` is a separate nullable column rather than a reuse of `updated_at` (which
+-- Rename_History does not have anyway): "when was this reverted" is a distinct fact from "when
+-- was this row last touched", and an audit trail that cannot distinguish them cannot answer
+-- whether a batch was ever undone.
+--
+-- TEXT ISO-8601 UTC per DEC-11, set explicitly by the Repository on UPDATE — no
+-- `ON UPDATE CURRENT_TIMESTAMP` (MySQL syntax SQLite does not support) and no AFTER UPDATE
+-- trigger.
+--
+-- Nullable with no default: NULL means "not reverted", which is the state every existing row is
+-- in. A default timestamp would claim every historical batch had been undone.
+
+ALTER TABLE Rename_History ADD COLUMN undone_at TEXT;
