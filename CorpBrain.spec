@@ -68,10 +68,25 @@ hiddenimports = [
 if sys.platform == "win32":
     hiddenimports.append("winreg")
 
+# Anaconda ships expat/openssl/libffi/liblzma/sqlite3/zlib/... as *loose* DLLs under
+# <env>\Library\bin. The stdlib C-extensions that need them (pyexpat, _ssl, _ctypes, _lzma,
+# sqlite3, ...) load them by name off PATH at import time, not via a linked reference PyInstaller
+# can trace. So a --onefile build made from an Anaconda-based interpreter freezes fine but dies at
+# startup with e.g. "ImportError: DLL load failed while importing pyexpat" — the import happens in
+# a PyInstaller runtime hook, before main.py's logging is even configured, so nothing is logged and
+# the exit code is a bare 1. Collecting the whole dir (it is small on this env — ~18MB) fixes all of
+# them at once, which is the same reasoning the onedir profile used before the onefile conversion
+# dropped it. Guarded on the dir existing so a clean (non-Anaconda) CPython build stays unaffected:
+# there Library\bin does not exist and the stdlib DLLs are already where PyInstaller finds them.
+binaries = []
+_conda_lib_bin = Path(sys.base_prefix) / "Library" / "bin"
+if _conda_lib_bin.is_dir():
+    binaries.extend((str(_dll), ".") for _dll in sorted(_conda_lib_bin.glob("*.dll")))
+
 a = Analysis(  # noqa: F821 - PyInstaller global
     [str(REPO_ROOT / "src" / "main.py")],
     pathex=[str(REPO_ROOT)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
