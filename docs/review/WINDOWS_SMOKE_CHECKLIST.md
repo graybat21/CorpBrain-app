@@ -31,13 +31,17 @@ npm ci
 npm run build
 
 # 2) exe 패키징
-python -m PyInstaller CorpBrain.spec
+python -m PyInstaller --noconfirm CorpBrain.spec
 
 # 3) 실행
 dist\CorpBrain.exe
 ```
 
-WebView2 Runtime 이 없으면 Evergreen Bootstrapper 안내 다이얼로그가 뜨고 **크래시 없이 종료**되어야 한다 (DEC-01). 이것도 검증 항목이다 → §3.0.
+**순서를 바꾸면 안 된다.** Vite 와 PyInstaller 가 둘 다 `dist\` 를 쓰는데 `npm run build` 는 `dist\` 를 **비우고** 시작한다. 먼저 패키징하면 그 exe 가 지워진다. 반대 순서는 안전하다 — `CorpBrain.spec` 이 `dist` 를 통째로가 아니라 파일 단위(`index.html` + `assets\`)로 수집하므로, 같은 디렉터리에 있는 exe 가 다음 빌드에 섞여 들어가지 않는다.
+
+**이 절차는 Windows 호스트에서만 유효하다.** PyInstaller 는 크로스 컴파일하지 않으므로 macOS 개발 호스트에서 같은 명령을 돌리면 `CorpBrain.exe` 가 아니라 macOS 실행 파일이 나온다. 그 빌드가 증명하는 것은 spec 이 파싱·수집 가능하다는 사실까지다.
+
+WebView2 Runtime 이 없으면 Evergreen Bootstrapper 안내 다이얼로그가 뜨고 **크래시 없이 종료**되어야 한다 (DEC-01). 이것도 검증 항목이다 → §3.0.2.
 
 준비물:
 - 문서 20건 이상이 들어 있는 폴더 2개 (다중 루트 병합 검증용)
@@ -50,13 +54,61 @@ WebView2 Runtime 이 없으면 Evergreen Bootstrapper 안내 다이얼로그가 
 
 각 항목은 **"화면에서 무엇을 하면"** → **"무엇이 보여야 하는가"** 형태다. 하나라도 실패하면 그 항목의 이슈 번호를 참조해 회귀로 등록한다.
 
-### 3.0 셸 기동 (DEC-01 / #14)
+### 3.0 셸 기동 (DEC-01 / DEC-02 / #14)
 
-- [ ] `CorpBrain.exe` 단일 파일 실행으로 창이 뜬다 (별도 설치·Node 프로세스 없음)
-- [ ] 작업 관리자에 `node.exe` 가 **없다**
+> **이 절 전체가 macOS 개발 호스트에서 원리적으로 검증 불가하다.** PyInstaller 는 크로스 컴파일하지 않고, WebView2 는 Windows 전용 런타임이다.
+>
+> PR #140 이 macOS 에서 실제로 증명한 범위는 다음까지다 — spec 이 파싱되고 의존성 수집이 성공하며(`python -m PyInstaller --noconfirm CorpBrain.spec` exit 0), 패키징된 **단일 바이너리가 부팅 → SPA 번들 탐색 → SQLite 마이그레이션 적용 → 루프백 랜덤 포트 바인딩 → `/api/v1/health` 200 확인 → 정상 종료** 를 수행하고(`CorpBrain --check-only` exit 0), 롤링 로그에 **포트만 남고 세션 토큰은 남지 않는다.**
+>
+> 아래 항목은 그 위에 남은, **Windows 호스트에서만 답이 나오는 질문들**이다. 하나도 수행되지 않았다 → §5.
+
+#### 3.0.1 단일 파일 실행 (DEC-01 / CON-02)
+
+- [ ] `CorpBrain.exe` **단일 파일** 실행으로 창이 뜬다 (별도 설치·런타임 배포 폴더 없음)
+- [ ] `dist\` 에 exe 하나만 있고 `_internal\` 같은 onedir 산출물 디렉터리가 **없다**
+- [ ] 작업 관리자에 `node.exe` 가 **없다** (DEC-01 — Node 는 빌드 타임 도구일 뿐이다)
+- [ ] 작업 관리자에 CorpBrain 프로세스가 **1개**다 (사이드카·다중 프로세스 구조가 아니다)
 - [ ] 창 크기 조절·최대화 시 레이아웃이 깨지지 않는다
 - [ ] 로그가 `%LocalAppData%\CorpBrain\logs\` 에 생성된다
-- [ ] (가능하면) WebView2 Runtime 미설치 PC 에서 안내 다이얼로그 후 정상 종료
+- [ ] 로그에 **세션 토큰이 없다** (`Local API ready on 127.0.0.1:<port>` 는 포트만 남긴다 — DEC-02)
+
+#### 3.0.2 WebView2 Runtime 부재 시 동작 (DEC-01)
+
+> 분기 자체는 `tests/test_app_ui_01_shell.py` 가 런타임 탐지기를 주입해 고정했다 — 안내 1회, **창 생성 0건**, 예외 없는 종료. **실제 다이얼로그가 뜨는지는 Windows 에서만 보인다.**
+
+- [ ] WebView2 Runtime **미설치** PC 에서 실행하면 안내 다이얼로그가 뜬다
+- [ ] 다이얼로그에 Evergreen Bootstrapper 주소가 **문자열로** 보인다
+- [ ] **앱이 부트스트래퍼를 자동으로 내려받지 않는다** (DEC-15 — 화이트리스트에 없는 네 번째 목적지가 된다)
+- [ ] 확인을 누르면 **크래시 없이** 종료된다 (Windows 오류 보고 대화상자·트레이스백 창이 뜨지 않는다)
+- [ ] 런타임을 설치한 뒤 재실행하면 정상 기동한다
+- [ ] **per-user 설치(HKCU)만** 되어 있는 PC 에서 "런타임 없음" 으로 오탐하지 않는다 (탐지는 `HKLM\WOW6432Node` · `HKLM` · `HKCU` 세 위치를 본다)
+
+#### 3.0.3 프레임리스 창과 드래그 영역 (#14 Task Breakdown)
+
+- [ ] 창에 **OS 기본 타이틀바가 없고** 앱이 그린 커스텀 타이틀바가 보인다
+- [ ] 타이틀바 빈 영역을 끌면 **창이 이동한다** (`.pywebview-drag-region`)
+- [ ] 타이틀바 안의 버튼·배지를 끌 때는 창이 **따라 움직이지 않는다** (`.pywebview-no-drag`)
+- [ ] 파일 목록·위키 본문을 드래그해도 창이 움직이지 않는다 (`easy_drag=False` 가 지켜지는지 — pywebview 기본값은 `True` 라 이 설정이 빠지면 어디를 끌어도 창이 따라온다)
+- [ ] 본문 텍스트를 마우스로 **선택**할 수 있다 (`text_select=True`)
+- [ ] 최소 크기(1024×640) 아래로는 줄어들지 않는다
+- [ ] **기동 직후 흰 화면이 번쩍이지 않는다.** pywebview `background_color` 기본값이 `#FFFFFF` 인데 SPA 는 `bg-slate-950` 다 — 첫 페인트 전까지 흰 배경이 보이면 이슈 #14 의 비기능 제약("네이티브 앱과 같은 부드러운 전환")에 미달이므로 **별도 이슈로 등록**하고 `create_shell_window` 에 어두운 `background_color` 를 지정한다
+
+#### 3.0.4 HashRouter 초기 라우트 (DEC-01)
+
+> `parseHash` 의 동작은 TypeScript 라 pytest 로 실행할 수 없고, 이 프로젝트는 Vitest/jsdom 을 채택하지 않기로 했다(§1). 자동으로 고정된 것은 파이썬 쪽 진입 상수(`INITIAL_ROUTE`)와 라우터의 기본 라우트(`DEFAULT_TAB`)가 **같은 탭을 가리킨다** 는 사실까지다.
+
+- [ ] 앱을 켜면 **대시보드**가 첫 화면이다 (셸이 `#/dashboard` 로 창을 연다)
+- [ ] 각 탭 이동 시 주소가 `#/files`, `#/wiki`, `#/rename`, `#/analytics`, `#/settings` 로 바뀐다 (개발자 도구 콘솔에서 `location.hash` 확인)
+- [ ] 콘솔에서 `location.hash = '#/analytics'` 를 실행하면 화면이 My Analytics 로 바뀐다 — **해시가 렌더를 구동하는지** 를 보는 항목이다. 반대 방향이면 주소만 바뀌고 화면은 그대로다
+- [ ] 존재하지 않는 라우트(`#/nope`)를 넣어도 앱이 비지 않고 대시보드로 떨어진다
+- [ ] `#/workspace/<실제 workspace_id>` 로 이동하면 그 워크스페이스가 선택된 채 대시보드가 뜬다
+
+#### 3.0.5 로컬 API 바인딩 (DEC-02 / DECISION_LOG CORE #5)
+
+- [ ] `netstat -ano | findstr <CorpBrain PID>` 결과가 **`127.0.0.1:<임의 포트>`** 다 (`0.0.0.0` 이 보이면 DEC-02 위반)
+- [ ] 포트가 **8000 이 아니고**, 앱을 두 번 재실행하면 **포트가 달라진다** (`port=0` OS 할당)
+- [ ] 앱을 두 번 동시에 실행해도 포트 충돌로 죽지 않는다
+- [ ] 브라우저로 `http://127.0.0.1:<포트>/api/v1/workspace` 에 접근하면 **401** 이 돌아온다 (토큰 없이 통과하는 라우트가 있으면 DEC-02 위반)
 
 ### 3.1 워크스페이스 생성 — `CreateWorkspaceModal` → `POST /workspace`
 
@@ -156,4 +208,6 @@ WebView2 Runtime 이 없으면 Evergreen Bootstrapper 안내 다이얼로그가 
 
 | 날짜 | 수행자 | 환경 | 결과 |
 |---|---|---|---|
-| — | — | — | 아직 수행되지 않음 (Windows 호스트 확보 후 진행 — #14) |
+| — | — | — | **아직 한 항목도 수행되지 않음.** Windows 호스트 미확보 |
+
+> **#14 의 상태를 오해하지 말 것.** 이슈 #14 는 셸 *조립* 까지 완료되어 close 됐다(PR #140) — `src/main.py`, `CorpBrain.spec`, HashRouter 가 리포에 있고 macOS 에서 패키징이 통과한다. **그러나 이 문서의 어떤 항목도 수행되지 않았다.** "#14 CLOSED" 는 "Windows 에서 동작이 확인됐다" 를 뜻하지 않으며, 이 표가 비어 있는 한 그 확인은 존재하지 않는다.
