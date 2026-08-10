@@ -9,16 +9,33 @@ import { RenamePage } from './pages/RenamePage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { useAppStore } from './store/appStore';
+import { subscribeToRoute } from './router';
 
 export const App: React.FC = () => {
   const activeTab = useAppStore((state) => state.activeTab);
   const bootstrap = useAppStore((state) => state.bootstrap);
+  const setActiveTab = useAppStore((state) => state.setActiveTab);
+  const selectWorkspace = useAppStore((state) => state.selectWorkspace);
 
   // One backend read on mount. `bootstrap` is a stable store action, so this does not re-run
   // per tab switch — each page refetches its own data instead.
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  // DEC-01 hash routing: the URL drives the render, not the other way round. `subscribeToRoute`
+  // reports the current hash immediately, which is what applies the entry route the shell opens
+  // the window at (`#/dashboard`, see src/main.py) — `hashchange` does not fire on first load.
+  useEffect(() => {
+    return subscribeToRoute((route) => {
+      setActiveTab(route.tab);
+      if (route.workspaceId) {
+        // `#/workspace/<id>` addresses which workspace is open. Guarded inside the store: an id
+        // that is not in the loaded list is ignored rather than blanking the current one.
+        void selectWorkspace(route.workspaceId);
+      }
+    });
+  }, [setActiveTab, selectWorkspace]);
 
   const renderContent = () => {
     switch (activeTab) {

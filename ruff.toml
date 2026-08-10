@@ -30,9 +30,19 @@ ignore = [
 "urllib.request".msg = "DEC-15: route outbound HTTP through NetworkGuard."
 "httpx".msg = "DEC-15: only network_guard.py may import httpx."
 "websockets".msg = "DEC-04: no WebSocket/SSE push channel exists by design; poll instead."
+# `http.client` is stdlib and was NOT on this list, which made it a silent way around every
+# entry above. Banned here so the gap closes, with exactly one exemption below: DEC-02 requires
+# the shell to confirm `/api/v1/health` answers *before* it loads the WebView, and that probe
+# targets our own loopback server — which DEC-15 places explicitly outside NetworkGuard's
+# outbound-only scope. Keeping the exemption as a visible line beats leaving the ban incomplete.
+"http.client".msg = "DEC-15: only src/main.py (DEC-02 loopback health probe) may import http.client."
 
 [lint.per-file-ignores]
 # NetworkGuard is the one module that is *supposed* to import a network library.
 "src/backend/network_guard.py" = ["TID251"]
 # Tests assert on the forbidden imports and patch urllib to simulate a dead daemon.
 "tests/*" = ["TID251"]
+# The shipping shell's DEC-02 health probe. Scoped to this one file rather than to a directory:
+# the exemption exists for a single call site, and a directory-wide ignore would quietly cover
+# every module added beside it later.
+"src/main.py" = ["TID251"]
