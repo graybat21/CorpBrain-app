@@ -11,10 +11,11 @@ import {
   HardDrive
 } from 'lucide-react';
 import { useAppStore } from '../store/appStore';
+import { navigateToTab } from '../router';
 import { CreateWorkspaceModal } from './CreateWorkspaceModal';
 
 export const Sidebar: React.FC = () => {
-  const { activeTab, setActiveTab, currentWorkspace, workspaces, selectWorkspace, addToast, bootstrap } =
+  const { activeTab, currentWorkspace, workspaces, selectWorkspace, addToast, bootstrap } =
     useAppStore();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
@@ -102,7 +103,10 @@ export const Sidebar: React.FC = () => {
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
+                /* Writes the hash; the resulting `hashchange` is what updates `activeTab`
+                   (see src/frontend/router.ts). Calling `setActiveTab` here as well would make
+                   the store the real router and leave the hash as decoration. */
+                onClick={() => navigateToTab(item.id)}
                 className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-xs font-medium transition ${
                   isActive
                     ? 'bg-indigo-600/90 text-white shadow-lg shadow-indigo-600/20'
