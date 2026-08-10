@@ -215,16 +215,22 @@ class TaskRepository:
     ) -> List[Dict[str, Any]]:
         conn = self.db_mgr.get_connection()
         cursor = conn.cursor()
+        # `rowid DESC` as the tiebreaker, same defect as issue #66's workspace listing:
+        # `created_at` uses `strftime('%f')`, which is millisecond resolution, so a rescan
+        # triggered right after a previous scan finished shares a timestamp with it and the
+        # "latest task" was arbitrary. Issue #64 reads this to decide whether the last scan hit
+        # the 10K guard, so an arbitrary winner meant the truncation warning could stick after a
+        # clean rescan — or vanish after a truncated one. rowid is monotonic per insert.
         if task_type is None:
             cursor.execute(
                 """SELECT * FROM Async_Task WHERE workspace_id = ?
-                   ORDER BY created_at DESC LIMIT ?;""",
+                   ORDER BY created_at DESC, rowid DESC LIMIT ?;""",
                 (workspace_id, limit),
             )
         else:
             cursor.execute(
                 """SELECT * FROM Async_Task WHERE workspace_id = ? AND task_type = ?
-                   ORDER BY created_at DESC LIMIT ?;""",
+                   ORDER BY created_at DESC, rowid DESC LIMIT ?;""",
                 (workspace_id, task_type, limit),
             )
         return [dict(row) for row in cursor.fetchall()]

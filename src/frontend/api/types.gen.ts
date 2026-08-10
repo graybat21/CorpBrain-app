@@ -387,6 +387,7 @@ export interface ScanSummaryRes {
   file_count: number;
   total_size_mb: number;
   estimated_analysis_seconds: number;
+  limit_reached?: boolean;
 }
 
 /**

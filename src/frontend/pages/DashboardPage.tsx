@@ -1,24 +1,29 @@
 import React, { useEffect, useState } from 'react';
-import { Files, BookOpen, ShieldCheck, Zap, ArrowUpRight, BarChart3 } from 'lucide-react';
+import { AlertTriangle, Files, BookOpen, ShieldCheck, Zap, ArrowUpRight, BarChart3 } from 'lucide-react';
 import * as api from '../api/client';
 import { errorMessage } from '../api/client';
-import type { AnalyticsSummaryRes } from '../api/types.gen';
+import type { AnalyticsSummaryRes, ScanSummaryRes } from '../api/types.gen';
 import { useAppStore } from '../store/appStore';
 
 export const DashboardPage: React.FC = () => {
   const { files, currentWorkspace, isReady, addToast, setActiveTab } = useAppStore();
   const [summary, setSummary] = useState<AnalyticsSummaryRes | null>(null);
+  const [scan, setScan] = useState<ScanSummaryRes | null>(null);
 
   const workspaceId = currentWorkspace?.workspace_id;
 
   useEffect(() => {
     if (!workspaceId) {
       setSummary(null);
+      setScan(null);
       return;
     }
     let cancelled = false;
     // DEC-11: the backend never infers a period boundary, so no from_time/to_time means
     // "all time". A KST week/month view would compute its own UTC bounds and pass them here.
+    //
+    // Two endpoints rather than one: the scan summary carries the file count, total size and
+    // the 10K guard state (WS-FE-03 / issue #64), none of which analytics knows about.
     api
       .getAnalyticsSummary(workspaceId)
       .then((res) => {
@@ -31,12 +36,27 @@ export const DashboardPage: React.FC = () => {
           addToast('error', errorMessage(err));
         }
       });
+    api
+      .getScanSummary(workspaceId)
+      .then((res) => {
+        if (!cancelled) {
+          setScan(res);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          addToast('error', errorMessage(err));
+        }
+      });
     return () => {
       cancelled = true;
     };
   }, [workspaceId, addToast]);
 
-  const totalFiles = files.length;
+  // The scan summary counts every scanned row server-side; `files` is the list the explorer
+  // currently holds. Preferring the server's count means the tile does not silently shrink when
+  // the list is filtered or still loading.
+  const totalFiles = scan ? scan.file_count : files.length;
   const highPriorityFiles = files.filter((f) => f.importance_score >= 50);
 
   // `compression_ratio` is the "<parsed files>:<wiki documents>" snapshot the analytics service
@@ -102,9 +122,21 @@ export const DashboardPage: React.FC = () => {
             <Files className="w-4 h-4 text-indigo-400" />
           </div>
           <p className="text-2xl font-bold text-white font-mono">{totalFiles} <span className="text-xs text-slate-400 font-sans">개</span></p>
-          <p className="text-[11px] text-emerald-400 flex items-center">
-            <ArrowUpRight className="w-3 h-3 mr-0.5" /> 10K Limit Guard 정상 (정상 탐색)
-          </p>
+          {/* WS-FE-03 / issue #64: the caption reflects the real guard state. It used to be the
+              hardcoded string "10K Limit Guard 정상 (정상 탐색)", which stayed green on a
+              truncated workspace — asserting everything was indexed at the exact moment it was
+              not, on the one tile a user checks to find out. */}
+          {scan === null ? (
+            <p className="text-[11px] text-slate-500">스캔 통계를 불러오는 중...</p>
+          ) : scan.limit_reached ? (
+            <p className="text-[11px] text-amber-400 flex items-center">
+              <AlertTriangle className="w-3 h-3 mr-0.5 shrink-0" /> 10,000개 제한 도달 — 일부 파일 미탐색
+            </p>
+          ) : (
+            <p className="text-[11px] text-emerald-400 flex items-center">
+              <ArrowUpRight className="w-3 h-3 mr-0.5 shrink-0" /> 10K Limit Guard 정상 ({scan.total_size_mb} MB)
+            </p>
+          )}
         </div>
 
         <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 space-y-2">
