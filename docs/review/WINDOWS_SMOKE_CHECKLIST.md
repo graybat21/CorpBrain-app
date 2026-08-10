@@ -64,13 +64,13 @@ WebView2 Runtime 이 없으면 Evergreen Bootstrapper 안내 다이얼로그가 
 
 #### 3.0.1 단일 파일 실행 (DEC-01 / CON-02)
 
-- [ ] `CorpBrain.exe` **단일 파일** 실행으로 창이 뜬다 (별도 설치·런타임 배포 폴더 없음)
-- [ ] `dist\` 에 exe 하나만 있고 `_internal\` 같은 onedir 산출물 디렉터리가 **없다**
-- [ ] 작업 관리자에 `node.exe` 가 **없다** (DEC-01 — Node 는 빌드 타임 도구일 뿐이다)
-- [ ] 작업 관리자에 CorpBrain 프로세스가 **1개**다 (사이드카·다중 프로세스 구조가 아니다)
-- [ ] 창 크기 조절·최대화 시 레이아웃이 깨지지 않는다
-- [ ] 로그가 `%LocalAppData%\CorpBrain\logs\` 에 생성된다
-- [ ] 로그에 **세션 토큰이 없다** (`Local API ready on 127.0.0.1:<port>` 는 포트만 남긴다 — DEC-02)
+- [ ] `CorpBrain.exe` **단일 파일** 실행으로 창이 뜬다 (별도 설치·런타임 배포 폴더 없음) — *육안(창 표시) → MANUAL_UI_SHEET*
+- [x] `dist\` 에 exe 하나만 있고 `_internal\` 같은 onedir 산출물 디렉터리가 **없다** — `Test-Path dist\_internal`·`dist\CorpBrain` 둘 다 `False`, `dir dist` 에 `CorpBrain.exe`(52.7MB)+`index.html`+`assets\` 만 (P7/W2, 2026-08-10)
+- [ ] 작업 관리자에 `node.exe` 가 **없다** (DEC-01 — Node 는 빌드 타임 도구일 뿐이다) — *육안 → MANUAL_UI_SHEET*
+- [ ] 작업 관리자에 CorpBrain 프로세스가 **1개**다 (사이드카·다중 프로세스 구조가 아니다) — *육안 → MANUAL_UI_SHEET*
+- [ ] 창 크기 조절·최대화 시 레이아웃이 깨지지 않는다 — *육안 → MANUAL_UI_SHEET*
+- [x] 로그가 `%LocalAppData%\CorpBrain\logs\` 에 생성된다 — `dist\CorpBrain.exe --check-only` 후 `corpbrain.log` 존재, `Local API ready on 127.0.0.1:9562` 기록 (P7/W2, 2026-08-10)
+- [x] 로그에 **세션 토큰이 없다** (`Local API ready on 127.0.0.1:<port>` 는 포트만 남긴다 — DEC-02) — `findstr`/`Select-String "[A-Za-z0-9_-]{40,}"` 매치 **0건**, 포트만 존재 (P7/W2, 2026-08-10)
 
 #### 3.0.2 WebView2 Runtime 부재 시 동작 (DEC-01)
 
@@ -105,10 +105,12 @@ WebView2 Runtime 이 없으면 Evergreen Bootstrapper 안내 다이얼로그가 
 
 #### 3.0.5 로컬 API 바인딩 (DEC-02 / DECISION_LOG CORE #5)
 
-- [ ] `netstat -ano | findstr <CorpBrain PID>` 결과가 **`127.0.0.1:<임의 포트>`** 다 (`0.0.0.0` 이 보이면 DEC-02 위반)
-- [ ] 포트가 **8000 이 아니고**, 앱을 두 번 재실행하면 **포트가 달라진다** (`port=0` OS 할당)
-- [ ] 앱을 두 번 동시에 실행해도 포트 충돌로 죽지 않는다
-- [ ] 브라우저로 `http://127.0.0.1:<포트>/api/v1/workspace` 에 접근하면 **401** 이 돌아온다 (토큰 없이 통과하는 라우트가 있으면 DEC-02 위반)
+- [x] `netstat -ano | findstr <CorpBrain PID>` 결과가 **`127.0.0.1:<임의 포트>`** 다 (`0.0.0.0` 이 보이면 DEC-02 위반) — `netstat -ano` 가 해당 PID 에 대해 `TCP 127.0.0.1:8906 ... LISTENING` (`0.0.0.0` 부재) (P7/W2, 2026-08-10)
+- [x] 포트가 **8000 이 아니고**, 앱을 두 번 재실행하면 **포트가 달라진다** (`port=0` OS 할당) — 2회 기동 시 RUN1=8906, RUN2=8919 (상이 & 둘 다 ≠8000) (P7/W2, 2026-08-10)
+- [x] 앱을 두 번 동시에 실행해도 포트 충돌로 죽지 않는다 — 위 2회 기동이 각각 다른 포트를 잡고 동시 LISTENING (P7/W2, 2026-08-10)
+- [x] 브라우저로 `http://127.0.0.1:<포트>/api/v1/workspace` 에 접근하면 **401** 이 돌아온다 (토큰 없이 통과하는 라우트가 있으면 DEC-02 위반) — 무토큰 `GET /api/v1/workspace` → `401 {"code":"UNAUTHORIZED","message":"Missing Bearer token"}`; 토큰 포함 시 200 (P7/W2, 2026-08-10)
+
+> **셸 기동 검증 방식 주석**: §3.0.1·§3.0.5 의 자동 항목은 두 경로로 증명됐다 — (a) `dist\CorpBrain.exe --check-only` (프리즈된 exe 의 부팅→마이그레이션→루프백 바인딩→health 200→종료, exit 0), (b) `scripts/dev_serve.py` 2회 기동(netstat·포트·401). `--check-only` 는 창을 열지 않으므로 "창이 뜬다"·작업관리자 육안 항목은 여전히 사람 몫이다(§3.0.2 도 이 PC 에 WebView2 Runtime `pv=151.0.4129.72` 가 설치돼 있어 *부재* 다이얼로그를 실증할 수 없다). → `WINDOWS_MANUAL_UI_SHEET.md`
 
 ### 3.1 워크스페이스 생성 — `CreateWorkspaceModal` → `POST /workspace`
 
@@ -122,8 +124,8 @@ WebView2 Runtime 이 없으면 Evergreen Bootstrapper 안내 다이얼로그가 
 - [ ] 스캔 실행 시 프로그레스 바가 `N/M` 과 퍼센트로 갱신된다
 - [ ] 완료 시 **Toast** 가 뜬다 (전체 화면 모달이 아니다 — #6 에서 AC 정정)
 - [ ] 완료 후 폴링이 멈춘다 (개발자 도구 Network 에 1초 요청이 계속 쌓이지 않음)
-- [ ] 블랙리스트 폴더(`.git`, `node_modules`)의 파일이 목록에 없다 (#47)
-- [ ] **10,000개 초과 폴더**: 절단 경고 Toast 가 뜨고, 마지막 Toast 가 "완료" 라고만 말하지 않는다 (#64)
+- [x] 블랙리스트 폴더(`.git`, `node_modules`)의 파일이 목록에 없다 (#47) — *백엔드 경로 한정*: W3 실 HTTP 스캔에서 `.git`/`node_modules` 하위 파일 제외, 색인 정확히 4건(`GET /workspace/{id}/file`) (P7/W3, 2026-08-10). *UI 목록 렌더는 육안 → MANUAL_UI_SHEET*
+- [ ] **10,000개 초과 폴더**: 절단 경고 Toast 가 뜨고, 마지막 Toast 가 "완료" 라고만 말하지 않는다 (#64) — *육안(Toast) → MANUAL_UI_SHEET*
 
 ### 3.3 대시보드 통계 바인딩 — `DashboardPage` → `GET /scan/summary` + `GET /analytics/summary` (#64)
 
@@ -142,7 +144,7 @@ WebView2 Runtime 이 없으면 Evergreen Bootstrapper 안내 다이얼로그가 
 ### 3.5 위키 탭 및 딥링크 — `WikiPage` → `GET /wiki` + `POST /deeplink/open` (#17, DEC-08)
 
 - [ ] 1-depth 폴더마다 탭이 하나씩 생기고, 탭 내용이 서로 섞이지 않는다 (#10)
-- [ ] 딥링크 배지를 클릭하면 **연결된 실제 파일**이 OS 기본 앱으로 열린다
+- [ ] 딥링크 배지를 클릭하면 **연결된 실제 파일**이 OS 기본 앱으로 열린다 — *백엔드 경로 한정*: W3 실 HTTP `POST /deeplink/open {file_id}` → `200 {"status":"success"}`, 서버 측 `os.startfile` 실행돼 파일이 열림(macOS 에서 한 번도 실행된 적 없던 DEC-08/REQ-FUNC-021 경로) (P7/W3, 2026-08-10). *배지 클릭 UI 는 육안 → MANUAL_UI_SHEET*
 - [ ] **문서 21건 이상인 폴더**: '참조 파일' 목록에 21번째 이후도 나온다 (#17 의 원래 결함)
 - [ ] 목록이 잘렸을 때 "관련 문서 N건이 더 있으나 생략되었습니다" 문구가 보인다 (#17)
 - [ ] 위키 마크다운에 **절대 경로가 노출되지 않는다** (`C:\Users\...` 검색 0건 — DEC-08)
@@ -159,7 +161,7 @@ WebView2 Runtime 이 없으면 Evergreen Bootstrapper 안내 다이얼로그가 
 
 ### 3.7 Watcher — `WatcherControl` → `PATCH /watcher` (#56~#60)
 
-- [ ] 모드 전환(즉시/유휴)이 UI 에 반영된다
+- [ ] 모드 전환(즉시/유휴)이 UI 에 반영된다 — ⚠️ **백엔드 결함 발견(#149)**: W3 실 HTTP `POST /watcher/config {"mode":"idle"|"realtime"}` 가 기존 DB(user_version=7)에서 `500 INTERNAL_ERROR` (`sqlite3.OperationalError: table Watcher_Config has no column named mode`). `mode` 컬럼이 v001 편집으로 추가돼 기존 DB 에 부재(DEC-05 위반). UI 검증 전에 이 결함부터 수정 필요 (P7/W3, 2026-08-10)
 - [ ] 파일을 외부에서 추가하면 큐 배지 숫자가 오른다
 - [ ] 유휴 모드에서 flush 후 큐가 비고 Toast 가 뜬다 (#59, #60)
 - [ ] 파일을 다른 폴더로 **이동**시켰을 때 딥링크가 깨지지 않는다 (DEC-08 — `file_id` 유지)
@@ -208,6 +210,7 @@ WebView2 Runtime 이 없으면 Evergreen Bootstrapper 안내 다이얼로그가 
 
 | 날짜 | 수행자 | 환경 | 결과 |
 |---|---|---|---|
-| — | — | — | **아직 한 항목도 수행되지 않음.** Windows 호스트 미확보 |
+| — | — | — | ~~아직 한 항목도 수행되지 않음. Windows 호스트 미확보~~ (P7 에서 해소) |
+| 2026-08-10 | P7 루프 (에이전트) | Windows 10 Pro 19045, Python 3.10.20(.venv), WebView2 `pv=151.0.4129.72` | **명령으로 증명 가능한 항목만 자동 검증.** exe onefile 빌드 + `--check-only` exit 0, 로그 토큰 부재, 루프백 바인딩·랜덤 포트·무토큰 401(§3.0.1·§3.0.5). 백엔드 실 HTTP 왕복으로 스캔 블랙리스트·딥링크 `os.startfile`·rename 적용/역방향·MAX_PATH>260·잠금파일 207 검증(§3.2·§3.5 백엔드 경로). **육안·조작 항목(창 표시·드래그·레이아웃·Toast·색상 전환 등)은 미수행 — `WINDOWS_MANUAL_UI_SHEET.md` 로 인계.** 발견 결함: #149(Watcher 스키마), #145(CI 로케일 커버리지). 상세: `docs/goals/REPORT_P7_*.md` |
 
 > **#14 의 상태를 오해하지 말 것.** 이슈 #14 는 셸 *조립* 까지 완료되어 close 됐다(PR #140) — `src/main.py`, `CorpBrain.spec`, HashRouter 가 리포에 있고 macOS 에서 패키징이 통과한다. **그러나 이 문서의 어떤 항목도 수행되지 않았다.** "#14 CLOSED" 는 "Windows 에서 동작이 확인됐다" 를 뜻하지 않으며, 이 표가 비어 있는 한 그 확인은 존재하지 않는다.
