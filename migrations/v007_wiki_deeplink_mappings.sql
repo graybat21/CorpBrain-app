@@ -1,0 +1,22 @@
+-- v007: add the Wiki_Content.deeplink_mappings column DEC-08 requires (issue #10)
+--
+-- `wiki_service.py` writes this column on both the INSERT and the UPDATE branch of `_save_wiki`,
+-- but no migration ever created it — so **wiki generation failed 100% of the time** with
+-- `sqlite3.OperationalError: table Wiki_Content has no column named deeplink_mappings`. The same
+-- defect class as issue #90 (`Rename_History.status`): a service writing a column that the schema
+-- never had, surviving because no test reached that line.
+--
+-- CLAUDE.md DEC-08 specifies the column and its contents, so nothing here is a design choice:
+--
+--   "`Wiki_Content.deeplink_mappings` maps sentence index → `file_id`. **Never persist an
+--    absolute path inside `markdown_content`, `deeplink_mappings`, or vector metadata**"
+--
+-- TEXT holding a JSON object, matching how `old_paths`/`new_paths` store JSON in Rename_History —
+-- SQLite has no JSON column type and DEC-05 rules out an ORM that would emulate one.
+--
+-- Nullable with no default rather than `DEFAULT '{}'`: an existing wiki row predates any mapping,
+-- and NULL says "never computed" while `{}` would claim "computed, found no anchors". The
+-- distinction matters because the second is a legitimate outcome for a wiki whose source files
+-- were all deleted.
+
+ALTER TABLE Wiki_Content ADD COLUMN deeplink_mappings TEXT;
