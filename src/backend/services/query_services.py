@@ -1,9 +1,12 @@
+import logging
 import os
 from typing import Any, Dict, List, Optional
 
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
 from src.backend.repositories.workspace_repository import WorkspaceRepository
+
+logger = logging.getLogger("CorpBrain.QueryServices")
 
 
 class WorkspaceQueryService:
@@ -81,10 +84,28 @@ class DeepLinkQueryService:
         row = cursor.fetchone()
 
         if not row:
+            # The anchor names a file_id the DB no longer has — a workspace deletion cascade, or a
+            # wiki that outlived its source rows. Broken, and the reason distinguishes it from a
+            # file that merely moved (REQ-FUNC-022).
+            logger.info("[DL-QRY-01] Anchor references an unknown file_id: %s", file_id)
             return {"file_id": file_id, "is_broken": True, "reason": "NOT_FOUND_IN_DB"}
 
         current_path = row["current_path"]
+        # `os.path.exists` swallows every OSError and returns False, which is the behaviour
+        # REQ-NF-007 asks for here — a permission-denied or unreachable network path must report
+        # "broken" rather than crash the wiki render. The cost is that "denied" and "deleted" are
+        # indistinguishable; the reason code says PATH_NOT_ACCESSIBLE for exactly that reason.
         exists = os.path.exists(current_path)
+
+        if not exists:
+            # AC S2 (issue #22): the mismatch is recorded. Logged, not returned — DEC-03/DEC-08
+            # keep absolute paths out of response bodies, and the local rolling log is where a
+            # support case can see which path was checked.
+            logger.warning(
+                "[DL-QRY-01] Deeplink path mismatch for file_id %s: '%s' is no longer accessible",
+                file_id,
+                current_path,
+            )
 
         return {
             "file_id": file_id,
