@@ -117,6 +117,12 @@ export interface ApiResponse_LlmHealthCheckRes_ {
   error?: ApiError | null;
 }
 
+export interface ApiResponse_LlmPriceUpdatedRes_ {
+  ok: boolean;
+  data?: LlmPriceUpdatedRes | null;
+  error?: ApiError | null;
+}
+
 export interface ApiResponse_RenameDiffRes_ {
   ok: boolean;
   data?: RenameDiffRes | null;
@@ -293,6 +299,9 @@ export interface LlmHealthCheckRes {
   embedding_model_ready?: boolean;
   generation_model_ready?: boolean;
   error_code?: string | null;
+  cloud_price_input_per_mtok?: number | null;
+  cloud_price_output_per_mtok?: number | null;
+  cloud_price_updated_at?: string | null;
 }
 
 /**
@@ -315,6 +324,30 @@ export interface LlmOptionReq {
    */
   llm_mode: string;
   api_key?: string | null;
+}
+
+/**
+ * DEC-16: prices are user-editable in settings and never fetched over the network.
+ *
+ * `cloud_price_updated_at` is supplied by the caller rather than stamped with `now()`. The field
+ * answers "which price list is this?", so overwriting it with the edit time would destroy the
+ * only thing that makes the figure interpretable — a user entering last quarter's published
+ * rate would have it labelled as today's.
+ */
+export interface LlmPriceUpdateReq {
+  cloud_price_input_per_mtok: number;
+  cloud_price_output_per_mtok: number;
+  cloud_price_updated_at: string;
+}
+
+/**
+ * The stored prices, echoed so the UI renders what persisted rather than what it sent.
+ */
+export interface LlmPriceUpdatedRes {
+  updated: boolean;
+  cloud_price_input_per_mtok: number;
+  cloud_price_output_per_mtok: number;
+  cloud_price_updated_at: string;
 }
 
 /**
@@ -530,6 +563,7 @@ export const API_PATHS = {
   GET_analyze_progress: "/api/v1/analyze/{task_id}/progress",
   GET_config_llm: "/api/v1/config/llm",
   POST_config_llm: "/api/v1/config/llm",
+  POST_config_llm_price: "/api/v1/config/llm/price",
   GET_health: "/api/v1/health",
   POST_llm_onboard: "/api/v1/llm/onboard",
   GET_task_interrupted: "/api/v1/task/interrupted",

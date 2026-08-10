@@ -217,6 +217,54 @@ class LlmHealthCheckRes(BaseModel):
     embedding_model_ready: bool = False
     generation_model_ready: bool = False
     error_code: Optional[str] = None
+    # DEC-16 / issue #30: the seeded cloud prices and the date they are current as of. The
+    # settings screen must show the reference date next to the figures, because a price with no
+    # date reads as live when it is a migration-seeded constant. These are prices, not secrets —
+    # unlike the API key, which is never echoed in any form (DEC-12).
+    cloud_price_input_per_mtok: Optional[float] = None
+    cloud_price_output_per_mtok: Optional[float] = None
+    cloud_price_updated_at: Optional[str] = None
+
+
+class LlmPriceUpdateReq(BaseModel):
+    """
+    DEC-16: prices are user-editable in settings and never fetched over the network.
+
+    `cloud_price_updated_at` is supplied by the caller rather than stamped with `now()`. The field
+    answers "which price list is this?", so overwriting it with the edit time would destroy the
+    only thing that makes the figure interpretable — a user entering last quarter's published
+    rate would have it labelled as today's.
+    """
+    cloud_price_input_per_mtok: float = Field(..., ge=0)
+    cloud_price_output_per_mtok: float = Field(..., ge=0)
+    cloud_price_updated_at: str = Field(..., min_length=1)
+
+    @field_validator("cloud_price_updated_at")
+    @classmethod
+    def validate_reference_date(cls, v: str) -> str:
+        """
+        DEC-11: TEXT ISO-8601 UTC. Parsed rather than pattern-matched so '2026-02-31' is rejected.
+
+        An unparseable reference date is worse than none: the UI would render it verbatim next to
+        a real number and imply the pair had been checked.
+        """
+        from datetime import datetime
+
+        try:
+            datetime.fromisoformat(v.replace("Z", "+00:00"))
+        except ValueError:
+            # `from None`: the ValueError text is what Pydantic surfaces in the DEC-03 `details`
+            # map, and chaining the parser's own message would put the raw input value in it.
+            raise ValueError("cloud_price_updated_at must be an ISO-8601 instant") from None
+        return v
+
+
+class LlmPriceUpdatedRes(BaseModel):
+    """The stored prices, echoed so the UI renders what persisted rather than what it sent."""
+    updated: bool
+    cloud_price_input_per_mtok: float
+    cloud_price_output_per_mtok: float
+    cloud_price_updated_at: str
 
 
 class LlmOnboardReq(BaseModel):
