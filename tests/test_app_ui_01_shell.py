@@ -79,8 +79,11 @@ def shell_env(tmp_path, monkeypatch):
     """
     A full boot with the real FastAPI app and a real uvicorn socket, but no GUI.
 
-    The database goes to a temp dir rather than `%LocalAppData%`: REQ-NF-004 asks for path
-    isolation, and a test run must not write into the user's real application data.
+    Both the database and the log file are redirected into a temp dir. REQ-NF-004 asks for path
+    isolation, and a test run must not write into the user's real `%LocalAppData%\\CorpBrain`.
+    `create_app` skips `configure_logging` when it is handed a DatabaseManager for exactly this
+    reason, but `main()` calls it directly — it owns the process — so the fixture has to stop it
+    here or every test run would append to the user's real rolling log.
     """
     from src.backend.db import DatabaseManager
 
@@ -92,6 +95,7 @@ def shell_env(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr(shell, "spa_dist_dir", lambda: dist)
+    monkeypatch.setattr(shell, "configure_logging", lambda: None)
 
     managers = []
     real_init = DatabaseManager.__init__
@@ -303,6 +307,9 @@ def test_window_does_not_open_when_health_never_answers(shell_env, monkeypatch):
 
 def test_missing_spa_bundle_fails_with_a_message_instead_of_an_empty_window(tmp_path, monkeypatch):
     """번들이 없으면 창을 열지 않는다 — 404 를 렌더한 창은 진단 불가능한 실패다."""
+    # Same log redirection as the `shell_env` fixture — `main()` configures logging before it
+    # checks for the bundle, so even this early-exit path would touch the real log directory.
+    monkeypatch.setattr(shell, "configure_logging", lambda: None)
     monkeypatch.setattr(shell, "spa_dist_dir", lambda: tmp_path / "absent")
     window_factory = _RecordingWindowFactory()
 
