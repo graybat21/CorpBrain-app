@@ -50,6 +50,7 @@ from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
 from src.backend.repositories.task_repository import TaskRepository
 from src.backend.repositories.workspace_repository import WorkspaceRepository
+from src.backend.services.analysis_service import FastAnalysisEngine
 from src.backend.services.scanner_service import ScannerService
 from src.backend.services.task_service import TaskQueryService, TaskRunner
 from src.backend.services.workspace_service import WorkspaceService
@@ -362,7 +363,17 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             )
             for r in rows
         ]
-        return ApiResponse.success(FileListRes(workspace_id=workspace_id, items=items, total=len(items)))
+        # The highlight set is computed from the same rows, not from a second query, so the ids
+        # can never point outside `items` (REQ-FUNC-012 / issue #1 AC S2).
+        top_ranked = FastAnalysisEngine.select_top_ranked(rows)
+        return ApiResponse.success(
+            FileListRes(
+                workspace_id=workspace_id,
+                items=items,
+                total=len(items),
+                top_ranked_file_ids=top_ranked,
+            )
+        )
 
     # --- API-002: Scan & Analysis Endpoints (DEC-04: 202 + task_id, then poll) ---
 

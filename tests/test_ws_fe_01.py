@@ -434,9 +434,12 @@ def test_file_list_endpoint_round_trips(api_client):
     # state, which is the behaviour that replaced the mock rows.
     empty = client.get(f"/api/v1/workspace/{ws_id}/file", headers=AUTH)
     assert empty.status_code == 200
+    # `top_ranked_file_ids` is empty here for the same reason `items` is — nothing scanned yet.
+    # Kept as a whole-body equality so a field added to this response has to be acknowledged
+    # rather than sliding in unnoticed (issue #1 added exactly this one).
     assert empty.json() == {
         "ok": True,
-        "data": {"workspace_id": ws_id, "items": [], "total": 0},
+        "data": {"workspace_id": ws_id, "items": [], "total": 0, "top_ranked_file_ids": []},
         "error": None,
     }
 

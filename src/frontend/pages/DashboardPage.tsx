@@ -6,7 +6,10 @@ import type { AnalyticsSummaryRes, ScanSummaryRes } from '../api/types.gen';
 import { useAppStore } from '../store/appStore';
 
 export const DashboardPage: React.FC = () => {
-  const { files, currentWorkspace, isReady, addToast, setActiveTab } = useAppStore();
+  const { files, topRankedFileIds, currentWorkspace, isReady, addToast, setActiveTab } = useAppStore();
+  // Membership test rather than indexOf on every row: the list is at most TOP_RANKED_LIMIT long,
+  // but `files` can hold 10,000 rows (SCAN-CMD-02) and this runs once per row.
+  const topRanked = new Set(topRankedFileIds);
   const [summary, setSummary] = useState<AnalyticsSummaryRes | null>(null);
   const [scan, setScan] = useState<ScanSummaryRes | null>(null);
 
@@ -198,7 +201,16 @@ export const DashboardPage: React.FC = () => {
 
         <div className="divide-y divide-slate-800">
           {files.map((file) => (
-            <div key={file.file_id} className="py-3 flex items-center justify-between">
+            <div
+              key={file.file_id}
+              /* AC S2: the top-ranked documents are the highlight target. The row itself is
+                 highlighted, not just the score chip — REQ-FUNC-012 asks for 상위 문서를 UI
+                 상단에 하이라이트, and a chip colour keyed to an absolute threshold marks every
+                 70-point file, which is not the same set. */
+              className={`py-3 flex items-center justify-between ${
+                topRanked.has(file.file_id) ? '-mx-2 px-2 rounded-lg bg-amber-950/30 ring-1 ring-amber-700/50' : ''
+              }`}
+            >
               <div className="flex items-center space-x-3">
                 <div
                   className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs ${
@@ -212,7 +224,14 @@ export const DashboardPage: React.FC = () => {
                   {file.importance_score}점
                 </div>
                 <div>
-                  <p className="text-xs font-semibold text-slate-200">{file.file_name}</p>
+                  <p className="text-xs font-semibold text-slate-200">
+                    {file.file_name}
+                    {topRanked.has(file.file_id) && (
+                      <span className="ml-2 align-middle text-[10px] bg-amber-900/60 text-amber-300 border border-amber-700/60 px-1.5 py-0.5 rounded">
+                        핵심 문서
+                      </span>
+                    )}
+                  </p>
                   <p className="text-[11px] text-slate-400 font-mono truncate max-w-lg">{file.current_path}</p>
                 </div>
               </div>

@@ -41,7 +41,9 @@ const ParseStatusBadge: React.FC<{ status: string }> = ({ status }) => {
 };
 
 export const FilesPage: React.FC = () => {
-  const { files, currentWorkspace, isReady, addToast, refreshFiles } = useAppStore();
+  const { files, topRankedFileIds, currentWorkspace, isReady, addToast, refreshFiles } = useAppStore();
+  // See DashboardPage: a Set keeps the per-row check O(1) against a 10,000-row table.
+  const topRanked = new Set(topRankedFileIds);
   const [searchTerm, setSearchTerm] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [progress, setProgress] = useState<TaskProgressRes | null>(null);
@@ -260,11 +262,24 @@ export const FilesPage: React.FC = () => {
           </thead>
           <tbody className="divide-y divide-slate-800/60">
             {visibleFiles.map((file) => (
-              <tr key={file.file_id} className="hover:bg-slate-800/40 transition">
+              <tr
+                key={file.file_id}
+                /* AC S2 highlight target — the same top-ranked set the dashboard marks, taken
+                   from the backend so the two screens can never disagree about which files are
+                   핵심 문서. */
+                className={`hover:bg-slate-800/40 transition ${
+                  topRanked.has(file.file_id) ? 'bg-amber-950/25' : ''
+                }`}
+              >
                 <td className="p-3.5 font-medium text-slate-200">
                   <div className="flex items-center space-x-2">
                     <FileText className="w-4 h-4 text-indigo-400 shrink-0" />
                     <span>{file.file_name}</span>
+                    {topRanked.has(file.file_id) && (
+                      <span className="text-[10px] bg-amber-900/60 text-amber-300 border border-amber-700/60 px-1.5 py-0.5 rounded shrink-0">
+                        핵심 문서
+                      </span>
+                    )}
                   </div>
                 </td>
                 <td className="p-3.5 font-mono text-slate-400">{file.extension}</td>

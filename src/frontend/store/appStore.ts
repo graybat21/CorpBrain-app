@@ -34,6 +34,16 @@ interface AppState {
   files: FileItem[];
   setFiles: (files: FileItem[]) => void;
 
+  /**
+   * `file_id`s of the fast-analysis top-ranked documents, most important first
+   * (REQ-FUNC-012 / issue #1 AC S2).
+   *
+   * Held as the backend's list rather than recomputed from `files`: the cutoff (how many, and
+   * whether an unanalysed score-0 file counts) is the backend's ranking definition, and a page
+   * slicing `files.slice(0, 3)` itself would drift from it the moment the rule changes.
+   */
+  topRankedFileIds: string[];
+
   /** True while a backend read is in flight, so pages can distinguish "empty" from "not yet". */
   isLoading: boolean;
   /** False until the first bootstrap attempt settles, success or failure. */
@@ -66,6 +76,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   files: [],
   setFiles: (files) => set({ files }),
+  topRankedFileIds: [],
 
   isLoading: false,
   isReady: false,
@@ -101,7 +112,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
       if (current) {
         const fileList = await api.listFiles(current.workspace_id);
-        set({ files: fileList.items });
+        set({ files: fileList.items, topRankedFileIds: fileList.top_ranked_file_ids ?? [] });
       }
     } catch (err) {
       get().addToast('error', errorMessage(err));
@@ -118,7 +129,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ isLoading: true });
     try {
       const fileList = await api.listFiles(current.workspace_id);
-      set({ files: fileList.items });
+      set({ files: fileList.items, topRankedFileIds: fileList.top_ranked_file_ids ?? [] });
     } catch (err) {
       get().addToast('error', errorMessage(err));
     } finally {
@@ -133,7 +144,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     // Clear the outgoing workspace's files first: rendering them under the new workspace's
     // name would attribute one workspace's documents to another.
-    set({ currentWorkspace: target, files: [] });
+    set({ currentWorkspace: target, files: [], topRankedFileIds: [] });
     await get().refreshFiles();
   },
 }));
