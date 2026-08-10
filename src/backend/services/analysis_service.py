@@ -41,6 +41,40 @@ class FastAnalysisEngine:
         # Clamp between 0 and 100
         return max(0, min(100, score))
 
+    #: How many files the UI highlights as "핵심 문서" (issue #1 AC Scenario 2).
+    #: REQ-FUNC-012 says "상위 문서를 UI 상단에 하이라이트" without fixing a count; the number 3
+    #: comes from the issue's acceptance criteria. It lives here rather than in the route or the
+    #: React page because the rank cutoff is a property of what the fast analysis *means* — two
+    #: consumers picking different cutoffs would highlight different files for the same scores.
+    TOP_RANKED_LIMIT = 3
+
+    @classmethod
+    def rank_key(cls, record: Dict[str, Any]) -> tuple:
+        """
+        Sort key for the importance ranking: score descending, then file name ascending.
+
+        The tiebreaker is not cosmetic. Files that were never analysed all sit at score 0, and
+        without a second key their relative order is whatever SQLite's scan happens to produce
+        — which makes the highlighted set change between two identical requests.
+        """
+        return (-(record.get("importance_score") or 0), record.get("file_name") or "")
+
+    @classmethod
+    def select_top_ranked(cls, records: List[Dict[str, Any]], limit: int | None = None) -> List[str]:
+        """
+        The `file_id`s of the highest-scoring files, most important first (ANA-CMD-01 AC S2).
+
+        Score-0 files are excluded rather than padded in. A freshly scanned workspace has not run
+        fast analysis yet, so every row sits at 0; returning three of them would have the
+        dashboard label arbitrary files as 핵심 문서 before any analysis produced that judgement.
+        Fewer than `limit` entries is therefore a valid answer, including an empty list.
+        """
+        if limit is None:
+            limit = cls.TOP_RANKED_LIMIT
+        scored = [r for r in records if (r.get("importance_score") or 0) > 0]
+        scored.sort(key=cls.rank_key)
+        return [r["file_id"] for r in scored[:limit]]
+
 
 class FastAnalysisService:
     def __init__(self, file_repo: FileRepository):
@@ -65,6 +99,7 @@ class FastAnalysisService:
 
         self.file_repo.bulk_upsert(updated_records)
 
-        # Return files sorted by importance_score descending
-        updated_records.sort(key=lambda item: item["importance_score"], reverse=True)
+        # Return files sorted by importance_score descending, same ordering the file list query
+        # and the UI highlight use — one ranking definition, three consumers.
+        updated_records.sort(key=FastAnalysisEngine.rank_key)
         return updated_records

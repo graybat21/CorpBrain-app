@@ -105,6 +105,21 @@ class FileListRes(BaseModel):
     workspace_id: str
     items: List[FileItemRes]
     total: int
+    top_ranked_file_ids: List[str] = []
+    """
+    The `file_id`s the UI highlights as 핵심 문서, most important first (REQ-FUNC-012, issue #1
+    AC Scenario 2).
+
+    SRS §6.1 API-002 originally put this in the `POST /analyze/fast` response as `top_files`,
+    but DEC-04 fixed that response to `202 + task_id` with no payload — so the ranking has to
+    surface from a query instead. It rides on this list rather than a fourth endpoint because
+    the highlight is a property of the very set of files being rendered.
+
+    Sent as ids, not as a `is_top_ranked` flag per item: a flag would be duplicated across
+    10,000 rows to mark three of them, and it would lose the ordering *among* the top three.
+    Shorter than `TOP_RANKED_LIMIT` (including empty) is valid — see
+    `FastAnalysisEngine.select_top_ranked`.
+    """
 
 
 # --- API-002: Analysis & Task DTOs ---

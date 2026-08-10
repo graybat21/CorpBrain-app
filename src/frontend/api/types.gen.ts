@@ -252,6 +252,7 @@ export interface FileListRes {
   workspace_id: string;
   items: FileItemRes[];
   total: number;
+  top_ranked_file_ids?: string[];
 }
 
 export interface HTTPValidationError {
