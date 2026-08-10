@@ -20,7 +20,7 @@ export type FileItem = FileItemRes;
 
 export type LlmMode = 'Option A' | 'Option B';
 
-export type ActiveTab = 'dashboard' | 'files' | 'wiki' | 'rename' | 'settings';
+export type ActiveTab = 'dashboard' | 'files' | 'wiki' | 'rename' | 'analytics' | 'settings';
 
 interface AppState {
   activeTab: ActiveTab;
