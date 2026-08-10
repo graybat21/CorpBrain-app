@@ -404,7 +404,11 @@ def test_built_archive_carries_the_spa_and_every_migration():
     if built is None:
         pytest.skip("no packaged artifact in dist/ — run `python -m PyInstaller CorpBrain.spec`")
 
-    entries = set(CArchiveReader(str(built)).toc)
+    # Normalise separators: PyInstaller's CArchive emits TOC member names with the host's path
+    # separator, so on Windows (the shipping platform, where this test finally runs against a real
+    # exe) the entries read "dist\index.html", not "dist/index.html". The assertions below are all
+    # written with forward slashes, so collapse "\" to "/" once here rather than per assertion.
+    entries = {name.replace("\\", "/") for name in CArchiveReader(str(built)).toc}
 
     assert "dist/index.html" in entries, "the SPA entry point is not inside the exe"
     assert any(name.startswith("dist/assets/") for name in entries), "SPA assets missing"
