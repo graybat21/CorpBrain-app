@@ -232,20 +232,49 @@ Write a well-structured markdown wiki that:
 
         return prompt
 
+    #: Cap on the "참조 파일" list, so a very large folder does not append a wall of anchors.
+    #: Unlike the previous hard `[:20]` slice, exceeding it is *stated* in the markdown rather
+    #: than silently dropped (issue #17).
+    MAX_ANCHORS = 50
+
     def _insert_deeplink_anchors(self, markdown: str, file_ids: List[str]) -> str:
         """
         Insert [[file_id:UUID]] anchors into markdown (DEC-08).
 
-        Strategy: Append anchors at the end of paragraphs or sections where relevant files are mentioned.
-        For now, simple append at the end of each major section.
+        One anchor per distinct source file, in first-seen order — which is relevance order,
+        because the caller passes chunk hits from the vector search.
+
+        Two defects fixed here (issue #17):
+
+        **De-duplication.** The caller passes one entry per *chunk*, and a single document
+        usually produces many chunks. The old `file_ids[:20]` therefore listed the same file
+        repeatedly and could show as few as one or two distinct documents while claiming to be
+        the folder's reference list.
+
+        **Silent truncation.** The old slice dropped everything past the 20th entry with no
+        indication, so on a folder of 30 documents the wiki simply had no anchor for the rest.
+        The user's only signal was absence, which is indistinguishable from "that document was
+        not relevant". A cap still exists (`MAX_ANCHORS`) because an unbounded list would bury
+        the summary, but going over it now says so — CLAUDE.md's rule against silent caps.
+
+        Anchors still land in a trailing section rather than on individual sentences. Per-sentence
+        binding is DEC-08's eventual target and needs the generation prompt to return sentence →
+        source mappings; that is tracked separately and is not a slice change.
         """
-        # Simple implementation: append all file_ids as a reference section
         if not file_ids:
             return markdown
 
+        # dict.fromkeys keeps first-seen order, unlike set().
+        unique_ids = list(dict.fromkeys(file_ids))
+        shown = unique_ids[:self.MAX_ANCHORS]
+        omitted = len(unique_ids) - len(shown)
+
         anchors_section = "\n\n---\n\n## 참조 파일\n\n"
-        for fid in file_ids[:20]:  # Limit to 20 deeplinks
+        for fid in shown:
             anchors_section += f"- [[file_id:{fid}]]\n"
+        if omitted > 0:
+            # Never let the list end without admitting it is partial.
+            anchors_section += f"\n> 관련 문서 {omitted}건이 더 있으나 목록에서 생략되었습니다.\n"
 
         return markdown + anchors_section
 
@@ -257,9 +286,19 @@ Write a well-structured markdown wiki that:
         """
         wiki_id = str(uuid.uuid4())
 
-        # Build deeplink_mappings (sentence_index -> file_id)
-        # Simple mapping: all file_ids used
-        mappings = {str(i): chunk["file_id"] for i, chunk in enumerate(chunks[:20])}
+        # deeplink_mappings: anchor index -> file_id, keyed to match the "참조 파일" list that
+        # `_insert_deeplink_anchors` wrote — same de-duplication, same order, same cap. The two
+        # were computed independently before (issue #17): the anchors came from de-duplicated
+        # file_ids while this mapping enumerated raw chunks, both truncated at a separate `[:20]`,
+        # so index N in the mapping did not refer to the Nth anchor in the document. A deeplink
+        # resolved through it could open a different file than the one the user clicked.
+        #
+        # DEC-08 specifies sentence index -> file_id as the eventual key. Reaching that requires
+        # the generation prompt to return per-sentence provenance, which is a prompt-contract
+        # change tracked separately; keying to the rendered anchor list is the honest description
+        # of what this wiki actually contains today.
+        unique_ids = list(dict.fromkeys(c["file_id"] for c in chunks))
+        mappings = {str(i): fid for i, fid in enumerate(unique_ids[:self.MAX_ANCHORS])}
 
         conn = self.db_mgr.get_connection()
         cursor = conn.cursor()
