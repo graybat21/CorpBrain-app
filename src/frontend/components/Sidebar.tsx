@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Activity,
   LayoutDashboard,
   FolderTree,
   BookOpen,
@@ -22,6 +23,7 @@ export const Sidebar: React.FC = () => {
     { id: 'files', label: '파일 탐색 & 중요도', icon: FolderTree },
     { id: 'wiki', label: '딥링크 위키 (Late Binding)', icon: BookOpen },
     { id: 'rename', label: '파일명 일괄 추천 (Diff)', icon: FileDiff },
+    { id: 'analytics', label: 'My Analytics (생산성)', icon: Activity },
     { id: 'settings', label: '보안 & LLM 설정', icon: ShieldAlert },
   ] as const;
 

@@ -6,6 +6,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { FilesPage } from './pages/FilesPage';
 import { WikiPage } from './pages/WikiPage';
 import { RenamePage } from './pages/RenamePage';
+import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { useAppStore } from './store/appStore';
 
@@ -29,6 +30,8 @@ export const App: React.FC = () => {
         return <WikiPage />;
       case 'rename':
         return <RenamePage />;
+      case 'analytics':
+        return <AnalyticsPage />;
       case 'settings':
         return <SettingsPage />;
       default:
