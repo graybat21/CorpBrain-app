@@ -114,9 +114,24 @@ export const FilesPage: React.FC = () => {
       const scanTask = await api.startScan(workspaceId);
       const scanDone = await api.pollTask(scanTask.task_id, { onProgress: setProgress });
       if (scanDone.status === 'failed') {
-        // DEC-03: the code, not a stack trace. SCAN_LIMIT_REACHED is the 10,000-file guard.
+        // DEC-03: the code, not a stack trace.
         addToast('error', `스캔이 실패했습니다 (${scanDone.error_code ?? 'INTERNAL_ERROR'}).`);
         return;
+      }
+      const scanTruncated =
+        scanDone.status === 'multi_status' && scanDone.error_code === 'SCAN_LIMIT_REACHED';
+      if (scanTruncated) {
+        // SCAN-CMD-02 / issue #64: the walk stopped at 10,000 files. The scan succeeded, so
+        // this is a 207 partial result and the flow continues — but it must be said out loud.
+        // Falling through to the success toast would report "완료" over a workspace that is
+        // missing files, and the user would trust an index they cannot see the edge of.
+        //
+        // A Toast rather than the AC's "에러 다이얼로그": CLAUDE.md §6 mandates non-blocking
+        // Toasts for polling outcomes, and this is not an error — the indexed files are usable.
+        addToast(
+          'warning',
+          '파일이 너무 많아 10,000개까지만 탐색했습니다. 워크스페이스 폴더 범위를 좁혀 다시 스캔하세요.',
+        );
       }
       // Files land in the DB at scan time, so show them before analysis starts.
       await refreshFiles();
@@ -133,6 +148,13 @@ export const FilesPage: React.FC = () => {
       if (analysisDone.status === 'multi_status') {
         // DEC-16: a partially failed batch must never read as a plain success.
         addToast('warning', '일부 파일의 분석이 실패했습니다. 재실행하면 실패한 파일만 처리됩니다.');
+      } else if (scanTruncated) {
+        // The analysis finished cleanly, but only over the truncated file set — so the closing
+        // message must not be the word "완료" on its own (issue #64).
+        addToast(
+          'warning',
+          `중요도 분석 완료 (${analysisDone.processed}건) — 단, 10,000개 제한으로 일부 파일은 탐색되지 않았습니다.`,
+        );
       } else {
         addToast('success', `스캔 및 중요도 분석 완료 (${analysisDone.processed}건).`);
       }

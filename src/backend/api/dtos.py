@@ -179,6 +179,10 @@ class ScanSummaryRes(BaseModel):
     file_count: int
     total_size_mb: float
     estimated_analysis_seconds: float
+    # True when the last finished scan stopped at SCAN-CMD-02's 10,000-file guard (issue #64).
+    # The dashboard needs this to caption the file count honestly — it previously printed a
+    # hardcoded "정상" that stayed green on a truncated workspace.
+    limit_reached: bool = False
 
 
 class WikiMarkdownRes(BaseModel):

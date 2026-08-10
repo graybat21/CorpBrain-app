@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from src.backend.db import DatabaseManager
 from src.backend.repositories.file_repository import FileRepository
+from src.backend.repositories.task_repository import TaskRepository
 from src.backend.repositories.workspace_repository import WorkspaceRepository
 
 logger = logging.getLogger("CorpBrain.QueryServices")
@@ -33,13 +34,23 @@ class WorkspaceQueryService:
 class ScanQueryService:
     """SCAN-QRY-01: 스캔 통계 조회 (REQ-FUNC-006)"""
 
-    def __init__(self, db_mgr: DatabaseManager):
+    def __init__(self, db_mgr: DatabaseManager, task_repo: Optional[TaskRepository] = None):
         self.db_mgr = db_mgr
+        self.task_repo = task_repo or TaskRepository(db_mgr)
 
     def get_scan_summary(self, workspace_id: str) -> Dict[str, Any]:
         """
         Returns scanned file count, total size (MB), and estimated analysis time.
         Estimated time based on 100ms per file (avg fast analysis throughput).
+
+        `limit_reached` reports whether the most recent scan stopped at SCAN-CMD-02's 10,000-file
+        guard (issue #64). It is read from `Async_Task`, not recomputed: whether the walk was
+        truncated is a property of that scan run, and `COUNT(*) == 10000` cannot distinguish
+        "truncated" from "the folder happens to hold exactly 10,000 files".
+
+        Without this the dashboard had no way to know, and printed a hardcoded "10K Limit Guard
+        정상" caption that stayed green on a truncated workspace — telling the user everything was
+        indexed at the exact moment it was not.
         """
         conn = self.db_mgr.get_connection()
         cursor = conn.cursor()
@@ -59,8 +70,24 @@ class ScanQueryService:
             "workspace_id": workspace_id,
             "file_count": file_count,
             "total_size_mb": total_mb,
-            "estimated_analysis_seconds": estimated_seconds
+            "estimated_analysis_seconds": estimated_seconds,
+            "limit_reached": self._last_scan_hit_the_limit(workspace_id),
         }
+
+    def _last_scan_hit_the_limit(self, workspace_id: str) -> bool:
+        """
+        True when the latest finished scan ended with `SCAN_LIMIT_REACHED`.
+
+        Only the most recent scan counts: a user who narrows their root folders and rescans has
+        fixed the problem, and a stale flag from the previous run would keep warning about a
+        truncation that no longer exists. Unfinished scans are skipped for the same reason —
+        their outcome is not yet known.
+        """
+        for task in self.task_repo.list_by_workspace(workspace_id, task_type="scan", limit=20):
+            if task["status"] in ("queued", "running"):
+                continue
+            return task["error_code"] == "SCAN_LIMIT_REACHED"
+        return False
 
 
 class DeepLinkQueryService:
