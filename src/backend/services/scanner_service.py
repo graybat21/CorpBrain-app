@@ -52,6 +52,9 @@ class ScannerService:
         scanned_records: List[Dict[str, Any]] = []
         seen_paths: set = set()
         limit_reached = False
+        # Per-extension tally of what the walk ignored (AC S2, issue #47). Shared across roots so
+        # the summary describes the whole scan rather than the last folder.
+        skipped_extensions: Dict[str, int] = {}
 
         try:
             # The limit raises out of _walk_root, so it aborts the remaining roots here too —
@@ -64,7 +67,9 @@ class ScannerService:
                     # a silent skip is precisely the #105 failure mode.
                     logger.warning(f"[SCAN-CMD-01] Root path no longer exists, skipped: '{norm_root}'")
                     continue
-                self._walk_root(workspace_id, norm_root, scanned_records, seen_paths)
+                self._walk_root(
+                    workspace_id, norm_root, scanned_records, seen_paths, skipped_extensions
+                )
         except ScanLimitReachedException:
             if raise_on_limit:
                 # Persist what the walk did collect before propagating, so the partial index
@@ -72,6 +77,13 @@ class ScannerService:
                 self.file_repo.bulk_upsert(scanned_records)
                 raise
             limit_reached = True
+
+        if skipped_extensions:
+            logger.info(
+                "[SCAN-CMD-01] Skipped unsupported extensions for workspace %s: %s",
+                workspace_id,
+                dict(sorted(skipped_extensions.items())),
+            )
 
         # Bulk upsert scanned records into DB
         self.file_repo.bulk_upsert(scanned_records)
@@ -83,6 +95,7 @@ class ScannerService:
         norm_root: str,
         scanned_records: List[Dict[str, Any]],
         seen_paths: set,
+        skipped_extensions: Dict[str, int],
     ) -> None:
         """
         Walk one root, appending to the shared `scanned_records` budget.
@@ -98,6 +111,19 @@ class ScannerService:
             for fname in files:
                 ext = os.path.splitext(fname)[1].lower()
                 if ext not in self.SUPPORTED_EXTENSIONS:
+                    # AC S2 (issue #47) requires skipped extensions to be recorded. Counted per
+                    # extension and logged once at the end of the scan, NOT one line per file:
+                    # a 10,000-file workspace with a node_modules-like tree would emit thousands
+                    # of lines and eat the 10MB/day rolling-log budget (REQ-NF-014) on data that
+                    # is only useful in aggregate — "what did the scan ignore, and how much".
+                    #
+                    # The extension is recorded, never the filename: a filename is document data
+                    # and CON-03/REQ-NF-005 keep it out of anything that leaves the machine, so
+                    # keeping logs free of it by habit is the cheaper discipline.
+                    if ext:
+                        skipped_extensions[ext] = skipped_extensions.get(ext, 0) + 1
+                    else:
+                        skipped_extensions["(none)"] = skipped_extensions.get("(none)", 0) + 1
                     continue
 
                 full_path = os.path.join(current_dir, fname)
