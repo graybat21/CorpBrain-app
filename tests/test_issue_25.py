@@ -281,10 +281,17 @@ def test_the_benchmark_script_runs_and_reports_a_p95():
     import sys
 
     script = Path(__file__).resolve().parent.parent / "scripts" / "bench_scan.py"
+    # Pin both ends to UTF-8. bench_scan.py prints an em-dash ("—", U+2014) in its RESULT line,
+    # and on a non-UTF-8 Windows host (e.g. a cp949 Korean locale) text=True would otherwise
+    # decode the child's output with the ANSI codepage and the reader thread would die on the
+    # 0xE2 lead byte, leaving result.stdout == None. PYTHONIOENCODING fixes the child's stdout
+    # encoding; encoding="utf-8" fixes ours. CI's English windows-latest never hit this.
     result = subprocess.run(
         [sys.executable, str(script), "--files", "60", "--runs", "3"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=180,
     )
 
@@ -304,10 +311,14 @@ def test_the_benchmark_fails_when_the_budget_is_unmeetable():
     import sys
 
     script = Path(__file__).resolve().parent.parent / "scripts" / "bench_scan.py"
+    # UTF-8 on both ends — see the sibling test above for why (em-dash in the RESULT line breaks
+    # a cp949 decode of the child's stdout).
     result = subprocess.run(
         [sys.executable, str(script), "--files", "60", "--runs", "2", "--budget-ms", "0"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=180,
     )
 
