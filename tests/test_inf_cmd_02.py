@@ -125,7 +125,7 @@ def test_exported_config_omits_the_key_column_across_installs():
         assert "fake-blob" not in cm1.export_config()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="asserts the no-DPAPI host behaviour")
+@pytest.mark.skipif(sys.platform == "win32", reason="asserts the non-Windows secret-storage refusal branch")
 def test_storing_a_key_is_refused_without_dpapi(monkeypatch):
     """
     A host without DPAPI must refuse to persist, not silently store something reversible.
@@ -142,7 +142,7 @@ def test_storing_a_key_is_refused_without_dpapi(monkeypatch):
         assert cm.is_api_key_configured() is False
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="asserts the no-DPAPI host behaviour")
+@pytest.mark.skipif(sys.platform == "win32", reason="asserts the non-Windows key-clearing branch")
 def test_clearing_a_key_is_allowed_without_dpapi():
     """Clearing writes no secret, so it must work everywhere."""
     with config_in_temp_dir() as cm:
