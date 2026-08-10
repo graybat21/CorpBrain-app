@@ -263,7 +263,13 @@ class LlmQueryService:
             "status_ok": status_ok,
             "embedding_model_ready": embedding_model_ready,
             "generation_model_ready": generation_model_ready,
-            "error_code": error_code
+            "error_code": error_code,
+            # DEC-16 / issue #30: the settings screen must render the price reference date next
+            # to the figures. Read from App_Config, never fetched — a price table over the
+            # network would be a fourth egress destination (DEC-15).
+            "cloud_price_input_per_mtok": float(self.config_mgr.get("cloud_price_input_per_mtok", "3.00")),
+            "cloud_price_output_per_mtok": float(self.config_mgr.get("cloud_price_output_per_mtok", "15.00")),
+            "cloud_price_updated_at": self.config_mgr.get("cloud_price_updated_at", ""),
         }
 
 

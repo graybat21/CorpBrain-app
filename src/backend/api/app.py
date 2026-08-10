@@ -25,6 +25,8 @@ from src.backend.api.dtos import (
     LlmHealthCheckRes,
     LlmOnboardReq,
     LlmOptionReq,
+    LlmPriceUpdatedRes,
+    LlmPriceUpdateReq,
     PendingRenameDiffItemRes,
     RenameApplyReq,
     RenameDiffRes,
@@ -530,6 +532,34 @@ def create_app(db_mgr: Optional[DatabaseManager] = None, session_token: Optional
             embedding_model_ready=health["embedding_model_ready"],
             generation_model_ready=health["generation_model_ready"],
             error_code=health["error_code"],
+            # DEC-16 / issue #30: prices plus the date they are current as of. Not secrets —
+            # unlike the API key, which is never echoed in any form (DEC-12).
+            cloud_price_input_per_mtok=health["cloud_price_input_per_mtok"],
+            cloud_price_output_per_mtok=health["cloud_price_output_per_mtok"],
+            cloud_price_updated_at=health["cloud_price_updated_at"],
+        ))
+
+    @app.post("/api/v1/config/llm/price", response_model=ApiResponse[LlmPriceUpdatedRes])
+    def update_llm_price(req: LlmPriceUpdateReq):
+        """
+        DEC-16: prices are migration-seeded and user-editable, never fetched over the network.
+
+        A separate route from `POST /api/v1/config/llm` because that one carries the API key and
+        switching engines is a security decision. Editing a price is neither, and folding them
+        together would mean a price edit had to resend the key.
+        """
+        from src.backend.config_manager import ConfigManager
+        cm = ConfigManager(db_mgr)
+        cm.set("cloud_price_input_per_mtok", str(req.cloud_price_input_per_mtok))
+        cm.set("cloud_price_output_per_mtok", str(req.cloud_price_output_per_mtok))
+        # The caller's reference date, not `now()`: the field says which price list this is, so
+        # stamping the edit time would relabel last quarter's rate as today's.
+        cm.set("cloud_price_updated_at", req.cloud_price_updated_at)
+        return ApiResponse.success(LlmPriceUpdatedRes(
+            updated=True,
+            cloud_price_input_per_mtok=req.cloud_price_input_per_mtok,
+            cloud_price_output_per_mtok=req.cloud_price_output_per_mtok,
+            cloud_price_updated_at=req.cloud_price_updated_at,
         ))
 
     @app.post(

@@ -31,6 +31,8 @@ import type {
   LlmHealthCheckRes,
   LlmOnboardReq,
   LlmOptionReq,
+  LlmPriceUpdateReq,
+  LlmPriceUpdatedRes,
   RenameApplyReq,
   RenameDiffRes,
   RenameUndoReq,
@@ -341,6 +343,18 @@ export function getLlmConfig(): Promise<LlmHealthCheckRes> {
  */
 export function setLlmConfig(payload: LlmOptionReq): Promise<LlmConfigUpdatedRes> {
   return data<LlmConfigUpdatedRes>('POST', API_PATHS.POST_config_llm, { body: payload });
+}
+
+/**
+ * DEC-16: the cloud price table is user-editable and is never fetched over the network —
+ * a price lookup would be a fourth egress destination (DEC-15).
+ *
+ * `cloud_price_updated_at` is the date the prices are *current as of*, supplied by the user, not
+ * the time of the edit. It answers "which price list is this?", so stamping it with `now()` would
+ * relabel a rate copied from last quarter's page as today's.
+ */
+export function setLlmPrice(payload: LlmPriceUpdateReq): Promise<LlmPriceUpdatedRes> {
+  return data<LlmPriceUpdatedRes>('POST', API_PATHS.POST_config_llm_price, { body: payload });
 }
 
 /**
