@@ -73,7 +73,12 @@ class WorkspaceRepository:
         """
         conn = self.db_mgr.get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM Workspace_Meta ORDER BY created_at DESC;")
+        # `rowid DESC` as the tiebreaker (issue #66): `created_at` uses `strftime('%f')`, which is
+        # millisecond resolution, so two workspaces created in the same millisecond had no defined
+        # order — the sidebar list could reshuffle between two identical requests, which reads as
+        # data changing on its own. rowid is monotonic per insert, so it breaks the tie in true
+        # creation order rather than arbitrarily.
+        cursor.execute("SELECT * FROM Workspace_Meta ORDER BY created_at DESC, rowid DESC;")
         workspaces = [dict(row) for row in cursor.fetchall()]
 
         cursor.execute(

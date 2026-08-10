@@ -1,12 +1,13 @@
 # CorpBrain Loop Checkpoint
 
 CORE: 1
-MINOR: 0
+MINOR: 1
 
 ## 의사결정 기록
 
 | # | 분류 | 이슈 | 결정 내용 | 근거 문서 부재 사유 |
 |---|---|---|---|---|
+| 2 | MINOR | #66 | `WorkspaceRepository.list_all` 의 `ORDER BY created_at DESC` 에 `rowid DESC` 2차 키를 추가. `strftime('%f')` 는 밀리초 해상도라 같은 밀리초에 생성된 워크스페이스들의 순서가 비결정적이며, 사이드바 목록이 동일 요청 두 번 사이에 재배치된다. | 정렬 2차 키 선택은 PRD·SRS·CLAUDE.md 어디에도 규정이 없다. 스키마 변경 없는 쿼리 수정이고 사용자에게 보이는 영향이 "목록 순서 안정성" 뿐이라 MINOR 로 계상한다. |
 | 1 | **CORE** | #10 | `Wiki_Content.deeplink_mappings` 컬럼을 신설하는 마이그레이션 `v007` 추가. `wiki_service.py:280,288` 이 이 컬럼에 write 하지만 **어떤 마이그레이션에도 존재하지 않아 위키 생성이 100% `sqlite3.OperationalError` 로 실패**한다. | **스키마 변경**이므로 CORE 트리거에 해당(목표 문서 2-2). 컬럼의 이름·내용·제약은 CLAUDE.md DEC-08 이 이미 규정하므로 *설계 판단*은 없으나, 마이그레이션 추가 자체가 스키마 변경이고 재발방지 3 이 "위반을 미완성으로 강등 금지" 를 요구하므로 보수적으로 CORE 로 계상한다. |
 
 ## 진행 상황
@@ -21,8 +22,8 @@ MINOR: 0
 | 4 | #10 | ANA-TEST-02 | 완료 | #125 |
 | 5 | #22 | DL-TEST-01 | 완료 | #126 |
 | 6 | #43 | RN-TEST-01 | 완료 | #127 |
-| 7 | #34 | LLM-TEST-02 | 진행 중 (PR 생성) | - |
-| 8 | #66 | WS-TEST-01 | 대기 | - |
+| 7 | #34 | LLM-TEST-02 | 완료 | #128 |
+| 8 | #66 | WS-TEST-01 | 진행 중 | - |
 | 9 | #51 | STAT-QRY-01 | 대기 | - |
 | 10 | #52 | STAT-TEST-01 | 대기 | - |
 | 11 | #50 | STAT-FE-01 | 대기 | - |
