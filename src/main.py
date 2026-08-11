@@ -256,8 +256,21 @@ def start_api_server(app, timeout_sec: float = SERVER_START_TIMEOUT_SEC):
 
     Returns ``(server, thread, port)``, or ``(server, thread, None)`` if the socket never bound.
     The port is read back off the bound socket — never chosen, never stored, never defaulted.
+
+    ``log_config=None`` is load-bearing, not a tidy-up (issue #159). uvicorn's default logging
+    config is a dictConfig whose formatter runs ``sys.stdout.isatty()``. This app ships with
+    ``console=False`` (see CorpBrain.spec), so a process launched without inherited standard
+    handles — which is every double-click — has ``sys.stdout is None`` and that call raises
+    ``AttributeError``, surfacing as ``ValueError: Unable to configure formatter 'default'``
+    from this very constructor. The window then never opens and nothing reaches the log,
+    because this runs before the first ``logger.info``.
+
+    Passing ``None`` skips uvicorn's dictConfig entirely. Its records still land somewhere:
+    ``configure_logging()`` attaches the rolling file handler to the **root** logger, so
+    ``uvicorn.error`` / ``uvicorn.access`` propagate into it — the only sink a windowed app has
+    (REQ-NF-014). uvicorn's own stdout handlers would have had nowhere to write regardless.
     """
-    config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
+    config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning", log_config=None)
     server = uvicorn.Server(config)
 
     thread = threading.Thread(target=server.run, name="corpbrain-api", daemon=True)
