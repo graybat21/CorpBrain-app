@@ -321,6 +321,55 @@ def wait_for_health(port: int, timeout_sec: float = HEALTH_TIMEOUT_SEC) -> bool:
     return False
 
 
+# --- 셸 JS API 브리지 (issue #167) -----------------------------------------------------------
+
+
+def _open_native_folder_dialog() -> Optional[list]:
+    """
+    Open pywebview's native folder-picker on the active window, returning the selected paths.
+
+    A browser cannot open an OS "browse for folder" dialog, so this is the shell's job. Isolated
+    from ``ShellApi.select_folder`` (which only maps the result) so that mapping is unit-testable
+    without a GUI. Returns ``None`` when there is no window yet — the dialog cannot be shown before
+    the shell has created one.
+    """
+    import webview
+
+    if not webview.windows:
+        return None
+    # FileDialog.FOLDER replaces the deprecated FOLDER_DIALOG; single-select by default.
+    return webview.windows[0].create_file_dialog(webview.FileDialog.FOLDER)
+
+
+class ShellApi:
+    """
+    The ``window.pywebview.api`` bridge exposed to the SPA (issue #167).
+
+    This is a **second IPC channel** alongside the DEC-02 loopback REST API, and it is deliberately
+    narrow: it exists only so the SPA can trigger native OS dialogs it cannot open itself. It is an
+    in-process bridge — no socket, no port — so unlike the HTTP API it is reachable *only* by the
+    WebView's own page, not by any other local process. It must never grow into a token-less data
+    channel: business data stays on the Bearer-gated REST API (DEC-02/DEC-03).
+    """
+
+    def __init__(self, folder_dialog: Callable[[], Optional[list]] = _open_native_folder_dialog):
+        # Injected so the result mapping below can be tested against a fake dialog with no GUI.
+        self._folder_dialog = folder_dialog
+
+    def select_folder(self) -> Optional[str]:
+        """
+        Show the native folder picker and return the chosen path, or ``None`` if cancelled.
+
+        ``create_file_dialog`` returns a sequence (one entry for a single-select folder dialog) or
+        ``None``. Both "cancelled" (None) and "empty selection" collapse to ``None`` so the SPA has
+        one thing to check.
+        """
+        result = self._folder_dialog()
+        if not result:
+            return None
+        return result[0]
+
+
 # --- 창 생성 ---------------------------------------------------------------------------------
 
 
@@ -336,6 +385,8 @@ def create_shell_window(url: str):
     ``background_color`` is passed explicitly (issue #151): pywebview's default is white, which
     flashes before the dark SPA paints. See ``WINDOW_BACKGROUND_COLOR``.
 
+    ``js_api`` exposes the native folder picker to the SPA (issue #167) — see ``ShellApi``.
+
     Imported inside the function so that importing this module (as the tests do) does not pull in
     a GUI toolkit.
     """
@@ -344,6 +395,7 @@ def create_shell_window(url: str):
     return webview.create_window(
         WINDOW_TITLE,
         url,
+        js_api=ShellApi(),
         width=WINDOW_SIZE[0],
         height=WINDOW_SIZE[1],
         min_size=WINDOW_MIN_SIZE,

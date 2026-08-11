@@ -473,6 +473,68 @@ def test_the_frameless_drag_contract_is_still_passed(monkeypatch):
     assert kwargs["text_select"] is True
 
 
+# --- 네이티브 폴더 선택 js_api (issue #167) ---------------------------------------------------
+
+
+def test_the_window_exposes_the_shell_js_api_bridge(monkeypatch):
+    """
+    A browser cannot open an OS folder dialog, so the shell must hand the SPA a `js_api` bridge
+    with `select_folder`. Asserted on the object actually passed to `create_window`, so dropping
+    the kwarg fails here.
+    """
+    kwargs = _captured_create_window_kwargs(monkeypatch)["kwargs"]
+
+    assert "js_api" in kwargs, "create_window was called without js_api — the SPA gets no bridge"
+    api = kwargs["js_api"]
+    assert isinstance(api, shell.ShellApi)
+    assert callable(getattr(api, "select_folder", None))
+
+
+def test_select_folder_returns_the_chosen_path():
+    """A folder dialog returns a sequence; select_folder hands the first entry back to the SPA."""
+    api = shell.ShellApi(folder_dialog=lambda: [r"C:\Users\docto\문서\2026기술수요조사"])
+    assert api.select_folder() == r"C:\Users\docto\문서\2026기술수요조사"
+
+
+def test_select_folder_returns_none_when_cancelled_or_empty():
+    """
+    Cancel (None) and an empty selection both collapse to None, so the SPA checks one thing.
+
+    Two cases in one test on purpose: an implementation that returned `result[0]` unconditionally
+    would raise IndexError on `()` — this pins that the guard is real, not incidental.
+    """
+    assert shell.ShellApi(folder_dialog=lambda: None).select_folder() is None
+    assert shell.ShellApi(folder_dialog=lambda: []).select_folder() is None
+
+
+def test_select_folder_uses_the_active_window_and_the_folder_dialog_type(monkeypatch):
+    """
+    The default dialog opener targets the active pywebview window with the FOLDER dialog type.
+
+    Exercised with a fake `webview` module so no GUI is created: proves the opener reads
+    `webview.windows[0]` and calls `create_file_dialog(FileDialog.FOLDER)`, and returns None when
+    no window exists yet.
+    """
+    calls = {}
+
+    class _FakeWindow:
+        def create_file_dialog(self, dialog_type):
+            calls["dialog_type"] = dialog_type
+            return (r"C:\picked",)
+
+    class _FakeWebview:
+        FileDialog = type("FileDialog", (), {"FOLDER": 20})
+        windows = [_FakeWindow()]
+
+    monkeypatch.setitem(sys.modules, "webview", _FakeWebview)
+    assert shell._open_native_folder_dialog() == (r"C:\picked",)
+    assert calls["dialog_type"] == 20
+
+    # No window yet -> the dialog cannot be shown, and the opener says so rather than raising.
+    _FakeWebview.windows = []
+    assert shell._open_native_folder_dialog() is None
+
+
 # --- 런타임 탐지 자체 --------------------------------------------------------------------------
 
 

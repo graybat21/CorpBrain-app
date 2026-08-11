@@ -1,13 +1,34 @@
 import React, { useState } from 'react';
-import { X, FolderPlus, AlertCircle, Loader2 } from 'lucide-react';
+import { X, FolderPlus, AlertCircle, Loader2, FolderSearch } from 'lucide-react';
 import * as api from '../api/client';
 import { errorMessage } from '../api/client';
+import { deriveWorkspaceName } from '../utils/pathName';
 
 interface CreateWorkspaceModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
   onError: (message: string) => void;
+}
+
+/**
+ * The pywebview shell bridge (issue #167). Present only when running inside CorpBrain.exe; a plain
+ * browser (dev_serve) leaves `window.pywebview` undefined, and the modal falls back to manual entry.
+ */
+interface PywebviewBridge {
+  api?: {
+    select_folder?: () => Promise<string | null>;
+  };
+}
+declare global {
+  interface Window {
+    pywebview?: PywebviewBridge;
+  }
+}
+
+/** The native folder picker is only reachable inside the shell. */
+function nativeFolderPickerAvailable(): boolean {
+  return typeof window.pywebview?.api?.select_folder === 'function';
 }
 
 export const CreateWorkspaceModal: React.FC<CreateWorkspaceModalProps> = ({
@@ -19,6 +40,10 @@ export const CreateWorkspaceModal: React.FC<CreateWorkspaceModalProps> = ({
   const [workspaceName, setWorkspaceName] = useState('');
   const [rootPaths, setRootPaths] = useState<string[]>(['']);
   const [loading, setLoading] = useState(false);
+  // Whether the user has typed a name themselves. Once true, folder selection stops overwriting it
+  // — the folder-name default is a convenience, never a thing that clobbers a deliberate choice.
+  const [nameEdited, setNameEdited] = useState(false);
+  const hasNativePicker = nativeFolderPickerAvailable();
 
   const handleAddPath = () => {
     setRootPaths([...rootPaths, '']);
@@ -34,6 +59,33 @@ export const CreateWorkspaceModal: React.FC<CreateWorkspaceModalProps> = ({
     const newPaths = [...rootPaths];
     newPaths[index] = value;
     setRootPaths(newPaths);
+  };
+
+  const handleNameChange = (value: string) => {
+    setWorkspaceName(value);
+    setNameEdited(true);
+  };
+
+  /**
+   * Open the native folder picker (shell only) and drop the chosen path into row `index`. If the
+   * user has not named the workspace yet, default the name to the selected folder (issue #167).
+   */
+  const handleBrowseFolder = async (index: number) => {
+    if (!window.pywebview?.api?.select_folder) {
+      return;
+    }
+    try {
+      const selected = await window.pywebview.api.select_folder();
+      if (!selected) {
+        return; // cancelled
+      }
+      handlePathChange(index, selected);
+      if (!nameEdited && !workspaceName.trim()) {
+        setWorkspaceName(deriveWorkspaceName(selected));
+      }
+    } catch (err) {
+      onError(`폴더 선택 실패: ${errorMessage(err)}`);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -60,6 +112,7 @@ export const CreateWorkspaceModal: React.FC<CreateWorkspaceModalProps> = ({
       // Reset form
       setWorkspaceName('');
       setRootPaths(['']);
+      setNameEdited(false);
       onClose();
     } catch (err) {
       onError(`워크스페이스 생성 실패: ${errorMessage(err)}`);
@@ -103,8 +156,8 @@ export const CreateWorkspaceModal: React.FC<CreateWorkspaceModalProps> = ({
             <input
               type="text"
               value={workspaceName}
-              onChange={(e) => setWorkspaceName(e.target.value)}
-              placeholder="예: 회사 문서 통합"
+              onChange={(e) => handleNameChange(e.target.value)}
+              placeholder="예: 회사 문서 통합 (폴더 선택 시 폴더명으로 자동 입력)"
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition"
               disabled={loading}
               required
@@ -136,6 +189,18 @@ export const CreateWorkspaceModal: React.FC<CreateWorkspaceModalProps> = ({
                     className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition font-mono"
                     disabled={loading}
                   />
+                  {hasNativePicker && (
+                    <button
+                      type="button"
+                      onClick={() => handleBrowseFolder(index)}
+                      className="shrink-0 flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg px-3 py-2.5 text-sm transition"
+                      disabled={loading}
+                      title="폴더 찾아보기"
+                    >
+                      <FolderSearch className="w-4 h-4 text-indigo-400" />
+                      <span>폴더 찾기</span>
+                    </button>
+                  )}
                   {rootPaths.length > 1 && (
                     <button
                       type="button"
@@ -150,13 +215,21 @@ export const CreateWorkspaceModal: React.FC<CreateWorkspaceModalProps> = ({
               ))}
             </div>
 
-            {/* Note about OS folder picker */}
+            {/* Folder-picker note — differs by whether the native picker is available. */}
             <div className="flex items-start space-x-2 bg-blue-950/20 border border-blue-800/40 rounded-lg p-3 mt-3">
               <AlertCircle className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-blue-300">
-                <strong>개발 노트:</strong> OS 네이티브 폴더 선택기는 pywebview 셸 구현 시 추가됩니다
-                (CON-01 / Issue #14). 현재는 경로를 직접 입력하세요.
-              </p>
+              {hasNativePicker ? (
+                <p className="text-xs text-blue-300">
+                  <strong>안내:</strong> <strong>폴더 찾기</strong> 로 폴더를 선택하면 경로가 채워지고,
+                  이름을 아직 입력하지 않았으면 폴더명이 워크스페이스 이름으로 자동 입력됩니다. 경로를
+                  직접 입력하거나 붙여넣어도 됩니다.
+                </p>
+              ) : (
+                <p className="text-xs text-blue-300">
+                  <strong>개발 노트:</strong> 네이티브 폴더 선택기는 <strong>CorpBrain.exe</strong> 셸에서
+                  동작합니다(브라우저 개발 모드에서는 표시되지 않음). 여기서는 경로를 직접 입력하세요.
+                </p>
+              )}
             </div>
           </div>
 
