@@ -16,6 +16,7 @@
  */
 
 import { API_PATHS } from './types.gen';
+import { resolveApiUrl } from './urlBuilder';
 import type {
   AnalyticsEventReq,
   AnalyticsEventRes,
@@ -106,28 +107,21 @@ function bridge(): CorpBrainBridge {
   return injected;
 }
 
-/** Substitute `{name}` placeholders in an API_PATHS entry. */
+/**
+ * Substitute `{name}` placeholders in an API_PATHS entry and build the request URL.
+ *
+ * Delegates to the pure `resolveApiUrl`, supplying the browser's real `window.location.href` as
+ * the base to resolve the injected `baseUrl` against. The injected value is "/" (DEC-02 keeps the
+ * OS-assigned port out of the markup), and `new URL(path, "/")` throws "Invalid base URL" — see
+ * urlBuilder.ts (issue #162).
+ */
 function buildUrl(
   baseUrl: string,
   template: string,
   params?: Record<string, string>,
   query?: Record<string, string | number | undefined>,
 ): string {
-  let path = template;
-  for (const [key, value] of Object.entries(params ?? {})) {
-    path = path.replace(`{${key}}`, encodeURIComponent(value));
-  }
-  const remaining = path.match(/\{(\w+)\}/);
-  if (remaining) {
-    throw new Error(`missing path parameter "${remaining[1]}" for ${template}`);
-  }
-  const url = new URL(path.replace(/^\//, ''), baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`);
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value !== undefined && value !== null && value !== '') {
-      url.searchParams.set(key, String(value));
-    }
-  }
-  return url.toString();
+  return resolveApiUrl(baseUrl, window.location.href, template, params, query);
 }
 
 interface RequestOptions {
