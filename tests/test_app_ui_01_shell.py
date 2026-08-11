@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import uvicorn
 
 from src import main as shell
 
@@ -323,6 +324,71 @@ def test_missing_spa_bundle_fails_with_a_message_instead_of_an_empty_window(tmp_
 
     assert code == shell.EXIT_BUNDLE_MISSING
     assert window_factory.urls == []
+
+
+# --- 콘솔 없는 실행 (issue #159) ---------------------------------------------------------------
+
+
+def test_boot_survives_a_windowed_process_with_no_standard_streams(shell_env, monkeypatch):
+    """
+    issue #159: the shipped exe is built ``console=False``, so a double-clicked process has
+    ``sys.stdout is None`` and ``sys.stderr is None``.
+
+    uvicorn's default log config calls ``sys.stdout.isatty()`` inside its formatter, which made
+    ``uvicorn.Config(...)`` raise ``ValueError: Unable to configure formatter 'default'`` — before
+    the first ``logger.info``, so the app died with an "Unhandled exception in script" dialog, no
+    window, no bound socket and an empty log. Every earlier check missed it because the exe was
+    launched with redirected handles, which is not how a user starts it.
+
+    Nulling both streams for the whole boot is the point of the test: a version that only nulls
+    stdout would keep passing against a formatter that happens to read stderr instead.
+    """
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+
+    window_factory = _RecordingWindowFactory()
+    code = shell.main(
+        [],
+        runtime_detector=lambda: "151.0.0.0",
+        dialog=lambda: pytest.fail("the runtime is present; no guidance dialog is expected"),
+        window_factory=window_factory,
+        loop_runner=lambda: None,
+    )
+
+    assert code == shell.EXIT_OK
+    assert len(window_factory.urls) == 1, "the window must still open without standard streams"
+
+
+def test_uvicorn_is_not_allowed_to_rebuild_logging_around_stdout(shell_env, monkeypatch):
+    """
+    Pins the mechanism, not just the symptom: `uvicorn.Config` must be constructed with
+    `log_config=None`.
+
+    Without this, a future edit could restore the default config and the test above would still
+    pass on a host where `sys.stdout` is merely monkeypatched to None but uvicorn's formatter is
+    never actually exercised. Reading the kwarg off the real call keeps the two honest.
+    """
+    seen = {}
+    real_config = uvicorn.Config
+
+    def _spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real_config(*args, **kwargs)
+
+    monkeypatch.setattr(uvicorn, "Config", _spy)
+
+    shell.main(
+        [],
+        runtime_detector=lambda: "151.0.0.0",
+        dialog=lambda: None,
+        window_factory=_RecordingWindowFactory(),
+        loop_runner=lambda: None,
+    )
+
+    assert "log_config" in seen, "uvicorn.Config was called without log_config (issue #159)"
+    assert seen["log_config"] is None, (
+        f"log_config must be None so uvicorn does not touch sys.stdout; got {seen['log_config']!r}"
+    )
 
 
 # --- 창 생성 인자 (issue #151) -----------------------------------------------------------------
