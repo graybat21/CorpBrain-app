@@ -440,6 +440,15 @@ class ProvisioningService:
                 check=True,
                 capture_output=True,
                 text=True,
+                # encoding/errors are mandatory with text=True (issue #145). Without them Python
+                # decodes the child's output with the host ANSI codepage — cp949 on a Korean
+                # Windows — and `ollama pull`'s progress output (unicode bars, non-ASCII status)
+                # kills subprocess's reader thread with UnicodeDecodeError. The exception surfaces
+                # from the thread, so `completed.stdout` comes back None and the failure looks
+                # nothing like its cause. errors="replace" keeps one odd byte from turning a
+                # successful pull into a crash.
+                encoding="utf-8",
+                errors="replace",
                 timeout=3600,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )

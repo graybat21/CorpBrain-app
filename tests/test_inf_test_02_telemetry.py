@@ -243,6 +243,11 @@ def test_the_ci_lint_rejects_a_forbidden_import(forbidden_import):
             ],
             capture_output=True,
             text=True,
+            # issue #145: text=True alone decodes with the host ANSI codepage, so a non-ASCII
+            # byte in ruff's output (a path, a quoted source line) kills the reader thread on a
+            # cp949 host and `result.stdout` silently becomes None.
+            encoding="utf-8",
+            errors="replace",
         )
 
     assert result.returncode != 0, (
@@ -281,6 +286,9 @@ def test_the_lint_permits_the_import_inside_network_guard():
         ],
         capture_output=True,
         text=True,
+        # issue #145 — see the sibling call above.
+        encoding="utf-8",
+        errors="replace",
     )
     assert result.returncode == 0, result.stdout
 
