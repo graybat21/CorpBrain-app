@@ -325,6 +325,88 @@ def test_missing_spa_bundle_fails_with_a_message_instead_of_an_empty_window(tmp_
     assert window_factory.urls == []
 
 
+# --- 창 생성 인자 (issue #151) -----------------------------------------------------------------
+
+
+def _captured_create_window_kwargs(monkeypatch):
+    """
+    Call the real ``create_shell_window`` with a stand-in ``webview`` module and return the
+    kwargs it passed.
+
+    The function imports ``webview`` inside its body, so injecting a fake into ``sys.modules``
+    intercepts the real call without a GUI toolkit being present. Asserting on the captured
+    kwargs — rather than grepping main.py for a string — is what makes these tests fail if the
+    argument is dropped: a source scan would still pass on a file that merely *mentions*
+    ``background_color`` in a comment.
+    """
+    captured = {}
+
+    class _FakeWebview:
+        @staticmethod
+        def create_window(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return object()
+
+    monkeypatch.setitem(sys.modules, "webview", _FakeWebview)
+    shell.create_shell_window("http://127.0.0.1:1234/#/dashboard")
+    return captured
+
+
+def test_the_window_is_created_with_an_explicit_dark_background(monkeypatch):
+    """
+    issue #151: pywebview defaults ``background_color`` to white, so a shell that omits it
+    flashes white before the dark SPA paints.
+
+    The assertion is on the value actually handed to ``create_window``, so removing the argument
+    from the call fails here even though the constant would still exist in the module.
+    """
+    captured = _captured_create_window_kwargs(monkeypatch)
+
+    assert "background_color" in captured["kwargs"], (
+        "create_window was called without background_color — pywebview then defaults to #FFFFFF"
+    )
+    background = captured["kwargs"]["background_color"]
+    assert background == shell.WINDOW_BACKGROUND_COLOR
+    assert background.lower() != "#ffffff", "white is the default this issue exists to replace"
+
+
+def test_the_window_background_matches_the_spa_first_paint_colour():
+    """
+    The shell's background must equal what `index.html` paints, or the flash becomes a colour
+    shift instead of a white one.
+
+    `<body class="bg-dark-bg">` is the first paint — not the React root's `bg-slate-950`, which
+    only appears once the bundle has mounted. `bg-dark-bg` resolves through tailwind.config.js's
+    `dark.bg`, so that file is the source of truth this pins against.
+    """
+    tailwind_config = _read(REPO_ROOT / "tailwind.config.js")
+    dark_section = tailwind_config[tailwind_config.index("dark: {"):]
+    match = re.search(r"bg:\s*'(#[0-9a-fA-F]{6})'", dark_section)
+    assert match, "tailwind.config.js no longer defines dark.bg"
+
+    assert shell.WINDOW_BACKGROUND_COLOR.lower() == match.group(1).lower(), (
+        "shell window background drifted from index.html's body colour (tailwind dark.bg)"
+    )
+
+    # The body really is the element carrying that colour — if index.html stops using the class,
+    # the assertion above would be pinning an unused token.
+    assert 'class="bg-dark-bg' in _read(REPO_ROOT / "index.html")
+
+
+def test_the_frameless_drag_contract_is_still_passed(monkeypatch):
+    """
+    Guards the arguments #151's change sits next to: adding a kwarg is an easy place to disturb
+    the drag contract, and `easy_drag` defaulting back to True would make the whole window
+    draggable (dragging a file row would move the window).
+    """
+    kwargs = _captured_create_window_kwargs(monkeypatch)["kwargs"]
+
+    assert kwargs["frameless"] is True
+    assert kwargs["easy_drag"] is False
+    assert kwargs["text_select"] is True
+
+
 # --- 런타임 탐지 자체 --------------------------------------------------------------------------
 
 

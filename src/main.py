@@ -65,6 +65,17 @@ WINDOW_MIN_SIZE = (1024, 640)
 #: and the first paint would depend on the SPA's fallback rather than on the shell's intent.
 INITIAL_ROUTE = "#/dashboard"
 
+#: Window background, painted before the WebView renders its first frame (issue #151).
+#: pywebview defaults `background_color` to "#FFFFFF", so without this the user sees a white
+#: flash on every launch before the dark SPA paints — the opposite of DEC-01's "네이티브 앱과
+#: 같은 부드러운 전환".
+#:
+#: The value tracks `index.html`'s `<body class="bg-dark-bg">`, NOT the React root's
+#: `bg-slate-950`: the body is what paints first, and it resolves to `dark.bg` in
+#: tailwind.config.js. Keep the two in sync — a mismatch reintroduces the flash as a colour
+#: shift instead of a white one.
+WINDOW_BACKGROUND_COLOR = "#0f172a"
+
 #: Seconds to wait for uvicorn to bind its socket, and then for /api/v1/health to answer.
 SERVER_START_TIMEOUT_SEC = 15.0
 HEALTH_TIMEOUT_SEC = 10.0
@@ -309,6 +320,9 @@ def create_shell_window(url: str):
     whole window draggable, so a click-and-drag anywhere — over the file list, over a text
     selection — would move the window instead.
 
+    ``background_color`` is passed explicitly (issue #151): pywebview's default is white, which
+    flashes before the dark SPA paints. See ``WINDOW_BACKGROUND_COLOR``.
+
     Imported inside the function so that importing this module (as the tests do) does not pull in
     a GUI toolkit.
     """
@@ -323,6 +337,7 @@ def create_shell_window(url: str):
         frameless=True,
         easy_drag=False,
         text_select=True,
+        background_color=WINDOW_BACKGROUND_COLOR,
     )
 
 
